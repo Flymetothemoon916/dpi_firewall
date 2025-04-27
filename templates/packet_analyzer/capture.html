@@ -1,0 +1,285 @@
+{% extends 'base/base.html' %}
+
+{% block title %}数据包捕获 - DPI防火墙系统{% endblock %}
+
+{% block page_title %}数据包捕获{% endblock %}
+
+{% block page_actions %}
+<a href="{% url 'packet_list' %}" class="btn btn-sm btn-outline-secondary">
+    <i class="fas fa-list"></i> 数据包列表
+</a>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-6">
+        <!-- 捕获配置卡片 -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="fas fa-cog me-2"></i>捕获配置
+            </div>
+            <div class="card-body">
+                <form id="captureForm" method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" id="action" value="start">
+                    
+                    <div class="mb-3">
+                        <label for="interface" class="form-label">网络接口</label>
+                        <select class="form-select" id="interface" name="interface">
+                            <option value="">自动选择</option>
+                            {% for interface in interfaces %}
+                            <option value="{{ interface.name }}">{{ interface.name }} - {{ interface.description }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="count" class="form-label">捕获数量</label>
+                        <input type="number" class="form-control" id="count" name="count" min="0" value="0">
+                        <div class="form-text">0表示无限制</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="timeout" class="form-label">超时时间(秒)</label>
+                        <input type="number" class="form-control" id="timeout" name="timeout" min="0" value="0">
+                        <div class="form-text">0表示无超时</div>
+                    </div>
+                    
+                    <div class="d-grid gap-2">
+                        {% if status.running %}
+                        <button type="button" id="stopButton" class="btn btn-danger">
+                            <i class="fas fa-stop me-2"></i>停止捕获
+                        </button>
+                        {% else %}
+                        <button type="button" id="startButton" class="btn btn-primary">
+                            <i class="fas fa-play me-2"></i>开始捕获
+                        </button>
+                        {% endif %}
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- 捕获状态卡片 -->
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-info-circle me-2"></i>捕获状态
+            </div>
+            <div class="card-body">
+                <div id="statusSection">
+                    <p>
+                        <strong>状态:</strong>
+                        <span id="statusBadge" class="badge {% if status.running %}bg-success{% else %}bg-secondary{% endif %}">
+                            {% if status.running %}运行中{% else %}未运行{% endif %}
+                        </span>
+                    </p>
+                    
+                    {% if status.process_id %}
+                    <p><strong>进程ID:</strong> <span id="processId">{{ status.process_id }}</span></p>
+                    {% endif %}
+                    
+                    <div class="mt-3">
+                        <button id="refreshButton" class="btn btn-sm btn-outline-secondary">
+                            <i class="fas fa-sync me-1"></i>刷新状态
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <!-- 捕获输出卡片 -->
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-terminal me-2"></i>捕获输出
+            </div>
+            <div class="card-body">
+                <div id="outputSection">
+                    <pre id="outputText" class="p-3 bg-dark text-light rounded" style="height: 300px; overflow-y: auto;">等待捕获开始...</pre>
+                    
+                    <div class="form-check mt-3">
+                        <input class="form-check-input" type="checkbox" id="autoScroll" checked>
+                        <label class="form-check-label" for="autoScroll">
+                            自动滚动到底部
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 使用说明卡片 -->
+        <div class="card mt-4">
+            <div class="card-header bg-info text-white">
+                <i class="fas fa-question-circle me-2"></i>使用说明
+            </div>
+            <div class="card-body">
+                <ol>
+                    <li>选择要监听的网络接口，如果不确定可留空自动选择</li>
+                    <li>设置捕获数量限制，0表示无限制</li>
+                    <li>设置捕获超时时间，0表示无超时</li>
+                    <li>点击"开始捕获"按钮开始监听网络流量</li>
+                    <li>观察输出窗口中的网络数据包信息</li>
+                    <li>可随时点击"停止捕获"按钮停止监听</li>
+                </ol>
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    注意：数据包捕获需要管理员权限，且可能对系统性能有一定影响
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(document).ready(function() {
+    // 开始捕获按钮
+    $('#startButton').click(function() {
+        $('#action').val('start');
+        $.ajax({
+            url: '{% url "capture_packets" %}',
+            type: 'POST',
+            data: $('#captureForm').serialize(),
+            success: function(response) {
+                if (response.success) {
+                    // 更新UI状态
+                    updateCaptureStatus(response.status);
+                    $('#outputText').text('捕获已开始...\n');
+                    
+                    // 禁用开始按钮，启用停止按钮
+                    $('#startButton').replaceWith(
+                        '<button type="button" id="stopButton" class="btn btn-danger">' +
+                        '<i class="fas fa-stop me-2"></i>停止捕获</button>'
+                    );
+                    
+                    // 绑定停止按钮事件
+                    $('#stopButton').click(stopCapture);
+                    
+                    // 设置定时刷新状态
+                    startStatusPolling();
+                } else {
+                    alert('启动失败: ' + response.message);
+                }
+            },
+            error: function() {
+                alert('请求失败，请重试');
+            }
+        });
+    });
+    
+    // 停止捕获按钮
+    $('#stopButton').click(stopCapture);
+    
+    // 刷新状态按钮
+    $('#refreshButton').click(refreshStatus);
+    
+    // 如果捕获正在运行，开始轮询状态
+    if ({{ status.running|yesno:"true,false" }}) {
+        startStatusPolling();
+    }
+});
+
+function stopCapture() {
+    $.ajax({
+        url: '{% url "capture_packets" %}',
+        type: 'POST',
+        data: {
+            csrfmiddlewaretoken: '{{ csrf_token }}',
+            action: 'stop'
+        },
+        success: function(response) {
+            if (response.success) {
+                // 更新UI状态
+                updateCaptureStatus(response.status);
+                $('#outputText').append('捕获已停止\n');
+                
+                // 停止状态轮询
+                stopStatusPolling();
+                
+                // 启用开始按钮，禁用停止按钮
+                $('#stopButton').replaceWith(
+                    '<button type="button" id="startButton" class="btn btn-primary">' +
+                    '<i class="fas fa-play me-2"></i>开始捕获</button>'
+                );
+                
+                // 绑定开始按钮事件
+                $('#startButton').click(function() {
+                    $('#action').val('start');
+                    // 其他开始捕获逻辑...
+                });
+            } else {
+                alert('停止失败: ' + response.message);
+            }
+        },
+        error: function() {
+            alert('请求失败，请重试');
+        }
+    });
+}
+
+function refreshStatus() {
+    $.ajax({
+        url: '{% url "capture_packets" %}',
+        type: 'POST',
+        data: {
+            csrfmiddlewaretoken: '{{ csrf_token }}',
+            action: 'status'
+        },
+        success: function(response) {
+            if (response.success) {
+                updateCaptureStatus(response.status);
+            }
+        }
+    });
+}
+
+function updateCaptureStatus(status) {
+    // 更新状态徽章
+    $('#statusBadge')
+        .removeClass('bg-success bg-secondary')
+        .addClass(status.running ? 'bg-success' : 'bg-secondary')
+        .text(status.running ? '运行中' : '未运行');
+    
+    // 更新进程ID
+    if (status.process_id) {
+        if ($('#processId').length) {
+            $('#processId').text(status.process_id);
+        } else {
+            $('#statusSection').append(
+                '<p><strong>进程ID:</strong> <span id="processId">' + 
+                status.process_id + '</span></p>'
+            );
+        }
+    } else {
+        $('p:contains("进程ID")').remove();
+    }
+    
+    // 更新输出
+    if (status.output && status.output.trim() !== '') {
+        $('#outputText').append(status.output);
+        
+        // 自动滚动到底部
+        if ($('#autoScroll').is(':checked')) {
+            var outputArea = document.getElementById('outputText');
+            outputArea.scrollTop = outputArea.scrollHeight;
+        }
+    }
+}
+
+// 轮询状态的定时器
+var statusPollTimer;
+
+function startStatusPolling() {
+    // 每3秒刷新一次状态
+    statusPollTimer = setInterval(refreshStatus, 3000);
+}
+
+function stopStatusPolling() {
+    if (statusPollTimer) {
+        clearInterval(statusPollTimer);
+    }
+}
+</script>
+{% endblock %} 

@@ -1,0 +1,256 @@
+{% extends 'base/base.html' %}
+
+{% block title %}数据包详情 - DPI防火墙系统{% endblock %}
+
+{% block page_title %}数据包详情{% endblock %}
+
+{% block page_actions %}
+<a href="{% url 'packet_list' %}" class="btn btn-sm btn-outline-secondary">
+    <i class="fas fa-arrow-left me-1"></i>返回列表
+</a>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- 基本信息卡片 -->
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="fas fa-info-circle me-2"></i>基本信息
+            </div>
+            <div class="card-body">
+                <table class="table">
+                    <tr>
+                        <th style="width: 30%">捕获时间</th>
+                        <td>{{ packet.timestamp|date:"Y-m-d H:i:s.u" }}</td>
+                    </tr>
+                    <tr>
+                        <th>状态</th>
+                        <td>
+                            {% if packet.status == 'allowed' %}
+                            <span class="badge bg-success">已允许</span>
+                            {% elif packet.status == 'blocked' %}
+                            <span class="badge bg-danger">已阻止</span>
+                            {% else %}
+                            <span class="badge bg-warning">可疑</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>方向</th>
+                        <td>
+                            {% if packet.direction == 'inbound' %}
+                            <span class="badge bg-primary">入站</span>
+                            {% else %}
+                            <span class="badge bg-success">出站</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>数据包大小</th>
+                        <td>{{ packet.packet_size }} 字节</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+
+        <!-- 协议信息卡片 -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="fas fa-network-wired me-2"></i>协议信息
+            </div>
+            <div class="card-body">
+                <table class="table">
+                    <tr>
+                        <th style="width: 30%">协议</th>
+                        <td>
+                            {% if packet.protocol %}
+                            <span class="badge bg-info">{{ packet.protocol.name }}</span>
+                            {% else %}
+                            <span class="badge bg-secondary">未知</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% if packet.protocol and packet.protocol.description %}
+                    <tr>
+                        <th>协议描述</th>
+                        <td>{{ packet.protocol.description }}</td>
+                    </tr>
+                    {% endif %}
+                    {% if dpi_result %}
+                    <tr>
+                        <th>应用层协议</th>
+                        <td>{{ dpi_result.application_protocol }}</td>
+                    </tr>
+                    {% if dpi_result.content_type %}
+                    <tr>
+                        <th>内容类型</th>
+                        <td>{{ dpi_result.content_type }}</td>
+                    </tr>
+                    {% endif %}
+                    {% endif %}
+                </table>
+            </div>
+        </div>
+
+        <!-- 规则匹配信息 -->
+        {% if packet.matched_rule %}
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="fas fa-shield-alt me-2"></i>匹配规则
+            </div>
+            <div class="card-body">
+                <table class="table">
+                    <tr>
+                        <th style="width: 30%">规则名称</th>
+                        <td>
+                            <a href="{% url 'rule_detail' packet.matched_rule.id %}">
+                                {{ packet.matched_rule.name }}
+                            </a>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>规则动作</th>
+                        <td>{{ packet.matched_rule.get_action_display }}</td>
+                    </tr>
+                    <tr>
+                        <th>规则优先级</th>
+                        <td>{{ packet.matched_rule.get_priority_display }}</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    
+    <!-- 连接信息卡片 -->
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="fas fa-exchange-alt me-2"></i>连接信息
+            </div>
+            <div class="card-body">
+                <table class="table">
+                    <tr>
+                        <th style="width: 30%">源IP地址</th>
+                        <td>{{ packet.source_ip }}</td>
+                    </tr>
+                    <tr>
+                        <th>源端口</th>
+                        <td>{{ packet.source_port }}</td>
+                    </tr>
+                    <tr>
+                        <th>目标IP地址</th>
+                        <td>{{ packet.destination_ip }}</td>
+                    </tr>
+                    <tr>
+                        <th>目标端口</th>
+                        <td>{{ packet.destination_port }}</td>
+                    </tr>
+                </table>
+                
+                <div class="text-center my-4">
+                    <div class="connection-diagram">
+                        <div class="source p-2 border rounded">
+                            <i class="fas fa-laptop me-2"></i>{{ packet.source_ip }}:{{ packet.source_port }}
+                        </div>
+                        <div class="arrow my-3">
+                            {% if packet.direction == 'inbound' %}
+                            <i class="fas fa-long-arrow-alt-down fa-2x text-primary"></i>
+                            {% else %}
+                            <i class="fas fa-long-arrow-alt-up fa-2x text-success"></i>
+                            {% endif %}
+                        </div>
+                        <div class="destination p-2 border rounded">
+                            <i class="fas fa-server me-2"></i>{{ packet.destination_ip }}:{{ packet.destination_port }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- DPI分析结果卡片 -->
+        {% if dpi_result %}
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="fas fa-search-plus me-2"></i>深度检测结果
+            </div>
+            <div class="card-body">
+                <table class="table">
+                    <tr>
+                        <th style="width: 30%">风险等级</th>
+                        <td>
+                            {% if dpi_result.risk_level == 'low' %}
+                            <span class="badge bg-success">低风险</span>
+                            {% elif dpi_result.risk_level == 'medium' %}
+                            <span class="badge bg-warning">中风险</span>
+                            {% else %}
+                            <span class="badge bg-danger">高风险</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>是否恶意</th>
+                        <td>
+                            {% if dpi_result.is_malicious %}
+                            <span class="text-danger"><i class="fas fa-exclamation-triangle me-1"></i>是</span>
+                            {% else %}
+                            <span class="text-success"><i class="fas fa-check me-1"></i>否</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% if dpi_result.detected_patterns %}
+                    <tr>
+                        <th>检测到的模式</th>
+                        <td>{{ dpi_result.detected_patterns }}</td>
+                    </tr>
+                    {% endif %}
+                </table>
+                
+                {% if dpi_result.metadata %}
+                <div class="mt-3">
+                    <h6>元数据</h6>
+                    <pre class="bg-light p-3 rounded"><code>{{ dpi_result.metadata|pprint }}</code></pre>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- 数据包内容卡片 -->
+<div class="card">
+    <div class="card-header">
+        <i class="fas fa-file-code me-2"></i>数据包内容
+    </div>
+    <div class="card-body">
+        {% if packet.payload %}
+        <div class="bg-light p-3 rounded">
+            <pre style="max-height: 400px; overflow-y: auto;"><code>{{ packet.payload }}</code></pre>
+        </div>
+        {% else %}
+        <div class="text-muted text-center py-3">
+            <i class="fas fa-info-circle me-2"></i>无可显示的数据包内容
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .connection-diagram {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    .source, .destination {
+        width: 100%;
+        background-color: #f8f9fa;
+    }
+    pre {
+        margin-bottom: 0;
+    }
+</style>
+{% endblock %}

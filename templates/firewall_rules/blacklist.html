@@ -1,0 +1,201 @@
+{% extends 'base/base.html' %}
+{% load static %}
+
+{% block title %}IP黑名单管理{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+        <h1 class="h2">IP黑名单管理</h1>
+        <div class="btn-toolbar mb-2 mb-md-0">
+            <a href="{% url 'whitelist' %}" class="btn btn-sm btn-outline-primary me-2">
+                <i class="fas fa-shield-alt"></i> 白名单管理
+            </a>
+            <a href="{% url 'rule_list' %}" class="btn btn-sm btn-outline-secondary">
+                <i class="fas fa-arrow-left"></i> 返回规则列表
+            </a>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-4">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="fas fa-ban"></i> 添加IP到黑名单
+                </div>
+                <div class="card-body">
+                    <form method="post" class="needs-validation" novalidate>
+                        {% csrf_token %}
+                        
+                        {% if form.non_field_errors %}
+                        <div class="alert alert-danger">
+                            {% for error in form.non_field_errors %}
+                            {{ error }}
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                        
+                        <div class="mb-3">
+                            <label for="{{ form.ip_address.id_for_label }}" class="form-label">IP地址</label>
+                            <input type="text" class="form-control {% if form.ip_address.errors %}is-invalid{% endif %}" 
+                                   id="{{ form.ip_address.id_for_label }}" name="{{ form.ip_address.html_name }}" 
+                                   value="{{ form.ip_address.value|default:'' }}" required>
+                            {% if form.ip_address.errors %}
+                            <div class="invalid-feedback">
+                                {% for error in form.ip_address.errors %}{{ error }}{% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="{{ form.description.id_for_label }}" class="form-label">禁止原因</label>
+                            <textarea class="form-control {% if form.description.errors %}is-invalid{% endif %}" 
+                                      id="{{ form.description.id_for_label }}" name="{{ form.description.html_name }}" 
+                                      rows="3">{{ form.description.value|default:'' }}</textarea>
+                            {% if form.description.errors %}
+                            <div class="invalid-feedback">
+                                {% for error in form.description.errors %}{{ error }}{% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="{{ form.expiry.id_for_label }}" class="form-label">过期时间 (可选)</label>
+                            <input type="datetime-local" class="form-control {% if form.expiry.errors %}is-invalid{% endif %}" 
+                                   id="{{ form.expiry.id_for_label }}" name="{{ form.expiry.html_name }}" 
+                                   value="{{ form.expiry.value|default:'' }}">
+                            {% if form.expiry.errors %}
+                            <div class="invalid-feedback">
+                                {% for error in form.expiry.errors %}{{ error }}{% endfor %}
+                            </div>
+                            {% endif %}
+                            <div class="form-text">留空则需要手动设置过期时间</div>
+                        </div>
+                        
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="{{ form.is_permanent.id_for_label }}" 
+                                   name="{{ form.is_permanent.html_name }}" {% if form.is_permanent.value %}checked{% endif %}>
+                            <label class="form-check-label" for="{{ form.is_permanent.id_for_label }}">永久禁止</label>
+                        </div>
+                        
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-danger">
+                                <i class="fas fa-plus"></i> 添加到黑名单
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-list"></i> 黑名单列表
+                    <span class="badge bg-danger">{{ ips|length }} 个IP</span>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover table-striped">
+                            <thead>
+                                <tr>
+                                    <th>IP地址</th>
+                                    <th>禁止原因</th>
+                                    <th>添加时间</th>
+                                    <th>过期时间</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for ip in ips %}
+                                <tr>
+                                    <td>{{ ip.ip_address }}</td>
+                                    <td>{{ ip.description|default:"-" }}</td>
+                                    <td>{{ ip.added_at|date:"Y-m-d H:i" }}</td>
+                                    <td>
+                                        {% if ip.is_permanent %}
+                                        <span class="badge bg-danger">永久</span>
+                                        {% elif ip.expiry %}
+                                        {{ ip.expiry|date:"Y-m-d H:i" }}
+                                        {% else %}
+                                        <span class="badge bg-warning">未设置</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <button class="btn btn-sm btn-outline-danger delete-ip" data-id="{{ ip.id }}" data-ip="{{ ip.ip_address }}">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="5" class="text-center py-4">黑名单中没有IP</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    $(document).ready(function() {
+        // 删除IP
+        $('.delete-ip').click(function() {
+            const id = $(this).data('id');
+            const ip = $(this).data('ip');
+            
+            if (confirm(`确定要从黑名单中删除 ${ip} 吗?`)) {
+                $.ajax({
+                    url: `/rules/blacklist/${id}/delete/`,
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': $('input[name="csrfmiddlewaretoken"]').val(),
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            toastr.success(response.message);
+                            // 刷新页面
+                            setTimeout(function() {
+                                window.location.reload();
+                            }, 1000);
+                        } else {
+                            toastr.error('操作失败，请重试');
+                        }
+                    },
+                    error: function() {
+                        toastr.error('操作失败，请重试');
+                    }
+                });
+            }
+        });
+        
+        // 表单验证
+        (function () {
+            'use strict'
+            
+            // 获取所有需要验证的表单
+            var forms = document.querySelectorAll('.needs-validation')
+            
+            // 遍历并阻止提交
+            Array.prototype.slice.call(forms)
+                .forEach(function (form) {
+                    form.addEventListener('submit', function (event) {
+                        if (!form.checkValidity()) {
+                            event.preventDefault()
+                            event.stopPropagation()
+                        }
+                        
+                        form.classList.add('was-validated')
+                    }, false)
+                })
+        })()
+    });
+</script>
+{% endblock %} 

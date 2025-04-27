@@ -1,0 +1,902 @@
+{% extends 'base/base.html' %}
+
+{% block title %}仪表盘 - DPI防火墙系统{% endblock %}
+
+{% block page_title %}系统仪表盘{% endblock %}
+
+{% block page_actions %}
+<button id="toggleAutoRefresh" class="btn btn-sm btn-success">
+    <i class="fas fa-sync-alt me-1"></i> <span id="refreshStatus">停用自动刷新</span>
+</button>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- 系统状态卡片 -->
+    <div class="col-md-6 col-lg-3">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <i class="fas fa-server me-2"></i>系统状态
+            </div>
+            <div class="card-body" id="systemStatusCard">
+                {% if system_status %}
+                <h5 class="card-title">
+                    {% if system_status.status == 'running' %}
+                    <span class="badge bg-success">运行中</span>
+                    {% elif system_status.status == 'stopped' %}
+                    <span class="badge bg-danger">已停止</span>
+                    {% elif system_status.status == 'paused' %}
+                    <span class="badge bg-warning">已暂停</span>
+                    {% else %}
+                    <span class="badge bg-secondary">未知</span>
+                    {% endif %}
+                </h5>
+                <div class="mb-2">
+                    <span class="text-muted">CPU使用率:</span>
+                    <div class="progress">
+                        <div class="progress-bar" role="progressbar" data-width="{{ system_status.cpu_usage }}" aria-valuenow="{{ system_status.cpu_usage }}" aria-valuemin="0" aria-valuemax="100">{{ system_status.cpu_usage }}%</div>
+                    </div>
+                </div>
+                <div>
+                    <span class="text-muted">内存使用率:</span>
+                    <div class="progress">
+                        <div class="progress-bar bg-info" role="progressbar" data-width="{{ system_status.memory_usage }}" aria-valuenow="{{ system_status.memory_usage }}" aria-valuemin="0" aria-valuemax="100">{{ system_status.memory_usage }}%</div>
+                    </div>
+                </div>
+                {% else %}
+                <p class="text-muted">系统状态未知</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 数据包统计卡片 -->
+    <div class="col-md-6 col-lg-3">
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <i class="fas fa-network-wired me-2"></i>数据包统计
+            </div>
+            <div class="card-body" id="packetStatsCard">
+                <h5 class="card-title">总数: <span id="totalPackets">{{ total_packets|default:'0' }}</span></h5>
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        已允许
+                        <span class="badge bg-success rounded-pill" id="allowedPackets">{{ allowed_packets|default:'0' }}</span>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        已阻止
+                        <span class="badge bg-danger rounded-pill" id="blockedPackets">{{ blocked_packets|default:'0' }}</span>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        可疑
+                        <span class="badge bg-warning rounded-pill" id="suspiciousPackets">{{ suspicious_packets|default:'0' }}</span>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- 流量统计卡片 -->
+    <div class="col-md-6 col-lg-3">
+        <div class="card">
+            <div class="card-header bg-success text-white">
+                <i class="fas fa-chart-line me-2"></i>流量统计
+                <small id="lastUpdated" class="float-end"></small>
+            </div>
+            <div class="card-body" id="trafficStatsCard">
+                {% if traffic_stats %}
+                <h5 class="card-title">实时流量</h5>
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        入站
+                        <span class="badge bg-primary rounded-pill" id="inboundPackets">{{ traffic_stats.inbound_packets }} 包</span>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        出站
+                        <span class="badge bg-primary rounded-pill" id="outboundPackets">{{ traffic_stats.outbound_packets }} 包</span>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        拦截
+                        <span class="badge bg-danger rounded-pill" id="trafficBlockedPackets">{{ traffic_stats.blocked_packets }} 包</span>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        入站流量
+                        <span class="badge bg-info rounded-pill" id="inboundBytesPerSec">{{ traffic_stats.inbound_bytes_per_sec|floatformat:2 }} 字节/秒</span>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        出站流量
+                        <span class="badge bg-info rounded-pill" id="outboundBytesPerSec">{{ traffic_stats.outbound_bytes_per_sec|floatformat:2 }} 字节/秒</span>
+                    </li>
+                </ul>
+                {% else %}
+                <p class="text-muted">暂无流量数据</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 告警统计卡片 -->
+    <div class="col-md-6 col-lg-3">
+        <div class="card">
+            <div class="card-header bg-warning text-dark">
+                <i class="fas fa-bell me-2"></i>告警统计
+            </div>
+            <div class="card-body" id="alertsCard">
+                <h5 class="card-title">未读告警: <span id="unreadAlertsCount">{{ unread_alerts_count|default:'0' }}</span></h5>
+                {% if recent_alerts %}
+                <div class="mt-3">
+                    <strong>最近告警:</strong>
+                    <ul class="list-group list-group-flush">
+                        {% for alert in recent_alerts %}
+                        <li class="list-group-item {% if not alert.is_read %}list-group-item-warning{% endif %}">
+                            <small class="text-muted">{{ alert.timestamp|date:"Y-m-d H:i" }}</small>
+                            <div>{{ alert.title }}</div>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% else %}
+                <p class="text-muted">暂无告警</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 常用规则 -->
+<div class="row mt-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-list me-2"></i>最常用规则
+            </div>
+            <div class="card-body" id="topRulesCard">
+                {% if top_rules %}
+                <ul class="list-group list-group-flush">
+                    {% for rule in top_rules %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <a href="{% url 'rule_detail' rule.id %}">{{ rule.name }}</a>
+                        <span class="badge bg-primary rounded-pill">{{ rule.hits }} 次命中</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-muted">暂无规则使用数据</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 最近数据包 -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-exchange-alt me-2"></i>最近数据包
+            </div>
+            <div class="card-body" id="recentPacketsCard">
+                <div class="spinner-border text-primary" role="status" id="packetsLoadingSpinner">
+                    <span class="visually-hidden">加载中...</span>
+                </div>
+                <div id="packetsContent" style="display: none;">
+                    <table class="table table-sm table-hover">
+                        <thead>
+                            <tr>
+                                <th>时间</th>
+                                <th>源 IP</th>
+                                <th>目标 IP</th>
+                                <th>状态</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recentPacketsTable">
+                            <!-- 动态填充 -->
+                        </tbody>
+                    </table>
+                </div>
+                <p class="text-muted" id="noPacketsMessage" style="display: none;">暂无数据包数据</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 流量趋势图 -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">实时流量趋势</h5>
+                <div class="btn-group">
+                    <button class="btn btn-sm btn-outline-primary" onclick="changeTimeRange('1h')">1小时</button>
+                    <button class="btn btn-sm btn-outline-primary" onclick="changeTimeRange('6h')">6小时</button>
+                    <button class="btn btn-sm btn-outline-primary" onclick="changeTimeRange('24h')">24小时</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-8">
+                        <canvas id="trafficChart"></canvas>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="traffic-stats">
+                            <div class="stat-item">
+                                <h6>入站流量</h6>
+                                <div class="stat-value" id="inboundTraffic">0 B/s</div>
+                                <div class="stat-change text-success" id="inboundChange">+0%</div>
+                            </div>
+                            <div class="stat-item">
+                                <h6>出站流量</h6>
+                                <div class="stat-value" id="outboundTraffic">0 B/s</div>
+                                <div class="stat-change text-danger" id="outboundChange">+0%</div>
+                            </div>
+                            <div class="stat-item">
+                                <h6>总流量</h6>
+                                <div class="stat-value" id="totalTraffic">0 B/s</div>
+                                <div class="stat-change text-primary" id="totalChange">+0%</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.traffic-stats {
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+.stat-item {
+    margin-bottom: 20px;
+    padding: 15px;
+    background: white;
+    border-radius: 6px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.stat-item h6 {
+    color: #6c757d;
+    margin-bottom: 10px;
+}
+
+.stat-value {
+    font-size: 24px;
+    font-weight: bold;
+    color: #2c3e50;
+}
+
+.stat-change {
+    font-size: 14px;
+    margin-top: 5px;
+}
+</style>
+
+<script>
+// 设置进度条宽度
+document.addEventListener('DOMContentLoaded', function() {
+    // 初始设置进度条宽度
+    setProgressBars();
+    
+    // 自动刷新相关
+    let autoRefreshEnabled = true;
+    let refreshInterval = null;
+    const refreshTime = 2000; // 2秒刷新一次
+    
+    // 自动刷新按钮切换
+    document.getElementById('toggleAutoRefresh').addEventListener('click', function() {
+        autoRefreshEnabled = !autoRefreshEnabled;
+        const refreshStatus = document.getElementById('refreshStatus');
+        
+        if (autoRefreshEnabled) {
+            refreshStatus.textContent = '停用自动刷新';
+            this.classList.remove('btn-outline-success');
+            this.classList.add('btn-success');
+            startAutoRefresh();
+        } else {
+            refreshStatus.textContent = '启用自动刷新';
+            this.classList.remove('btn-success');
+            this.classList.add('btn-outline-success');
+            stopAutoRefresh();
+        }
+    });
+    
+    // 初始立即启动自动刷新
+    startAutoRefresh();
+    
+    // 自动刷新函数
+    function startAutoRefresh() {
+        if (refreshInterval) {
+            clearInterval(refreshInterval);
+        }
+        
+        // 立即执行一次
+        fetchDashboardData();
+        
+        // 设置定时器
+        refreshInterval = setInterval(fetchDashboardData, refreshTime);
+    }
+    
+    // 停止自动刷新
+    function stopAutoRefresh() {
+        if (refreshInterval) {
+            clearInterval(refreshInterval);
+            refreshInterval = null;
+        }
+    }
+    
+    // 设置进度条宽度
+    function setProgressBars() {
+    document.querySelectorAll('.progress-bar[data-width]').forEach(function(bar) {
+        bar.style.width = bar.dataset.width + '%';
+    });
+    }
+    
+    // 获取仪表盘数据
+    function fetchDashboardData() {
+        fetch('/dashboard/get-dashboard-data/')
+            .then(response => response.json())
+            .then(data => {
+                // 更新系统状态
+                updateSystemStatus(data.system_status);
+                
+                // 更新流量统计
+                updateTrafficStats(data.traffic_stats, data.real_time_stats);
+                
+                // 更新数据包统计
+                updatePacketStats(data.packets);
+                
+                // 更新告警信息
+                updateAlerts(data.alerts);
+                
+                // 更新最近数据包
+                updateRecentPackets(data.recent_packets);
+                
+                // 更新最常用规则
+                updateTopRules(data.top_rules);
+                
+                // 更新流量图表
+                updateTrafficChart(data);
+                
+                // 更新最后更新时间
+                const lastUpdated = document.getElementById('lastUpdated');
+                if (lastUpdated) {
+                    lastUpdated.textContent = new Date().toLocaleTimeString();
+                }
+            })
+            .catch(error => {
+                console.error('更新仪表盘数据失败:', error);
+            });
+    }
+
+    // 显示错误消息
+    function showErrorMessage(message) {
+        // 如果已存在消息，先移除
+        const existingAlert = document.querySelector('.alert-danger');
+        if (existingAlert) {
+            existingAlert.remove();
+        }
+        
+        // 创建新的错误消息
+        const alertDiv = document.createElement('div');
+        alertDiv.className = 'alert alert-danger alert-dismissible fade show';
+        alertDiv.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+        
+        // 插入到页面顶部
+        const mainContent = document.querySelector('.main-content');
+        mainContent.insertBefore(alertDiv, mainContent.firstChild);
+        
+        // 5秒后自动消失
+        setTimeout(() => {
+            alertDiv.remove();
+        }, 5000);
+    }
+    
+    // 更新系统状态
+    function updateSystemStatus(status) {
+        if (!status) return;
+        
+        let statusHTML = '';
+        let statusClass = '';
+        let statusText = '';
+        
+        if (status.status === 'running') {
+            statusClass = 'bg-success';
+            statusText = '运行中';
+        } else if (status.status === 'stopped') {
+            statusClass = 'bg-danger';
+            statusText = '已停止';
+        } else if (status.status === 'paused') {
+            statusClass = 'bg-warning';
+            statusText = '已暂停';
+        } else {
+            statusClass = 'bg-secondary';
+            statusText = '未知';
+        }
+        
+        statusHTML = `
+            <h5 class="card-title">
+                <span class="badge ${statusClass}">${statusText}</span>
+            </h5>
+            <div class="mb-2">
+                <span class="text-muted">CPU使用率:</span>
+                <div class="progress">
+                    <div class="progress-bar" role="progressbar" style="width: ${status.cpu_usage}%" 
+                        aria-valuenow="${status.cpu_usage}" aria-valuemin="0" 
+                        aria-valuemax="100">${status.cpu_usage}%</div>
+                </div>
+            </div>
+            <div>
+                <span class="text-muted">内存使用率:</span>
+                <div class="progress">
+                    <div class="progress-bar bg-info" role="progressbar" style="width: ${status.memory_usage}%" 
+                        aria-valuenow="${status.memory_usage}" aria-valuemin="0" 
+                        aria-valuemax="100">${status.memory_usage}%</div>
+                </div>
+            </div>
+        `;
+        
+        document.getElementById('systemStatusCard').innerHTML = statusHTML;
+    }
+    
+    // 更新数据包统计
+    function updatePacketStats(packets) {
+        if (!packets) return;
+        
+        document.getElementById('totalPackets').textContent = packets.total;
+        document.getElementById('allowedPackets').textContent = packets.allowed;
+        document.getElementById('blockedPackets').textContent = packets.blocked;
+        document.getElementById('suspiciousPackets').textContent = packets.suspicious;
+    }
+    
+    // 更新流量统计
+    function updateTrafficStats(stats, realStats) {
+        if (!stats && !realStats) return;
+        
+        const inboundElement = document.getElementById('inboundPackets');
+        const outboundElement = document.getElementById('outboundPackets');
+        const blockedElement = document.getElementById('trafficBlockedPackets');
+        const inboundBytesPerSecElement = document.getElementById('inboundBytesPerSec');
+        const outboundBytesPerSecElement = document.getElementById('outboundBytesPerSec');
+        
+        if (!inboundElement || !outboundElement || !blockedElement || !inboundBytesPerSecElement || !outboundBytesPerSecElement) return;
+        
+        // 如果有实时统计，优先使用实时统计
+        if (realStats) {
+            inboundElement.textContent = realStats.inbound_packets + ' 包';
+            outboundElement.textContent = realStats.outbound_packets + ' 包';
+            blockedElement.textContent = realStats.blocked_packets + ' 包';
+            inboundBytesPerSecElement.textContent = realStats.inbound_bytes.toFixed(2) + ' 字节/秒';
+            outboundBytesPerSecElement.textContent = realStats.outbound_bytes.toFixed(2) + ' 字节/秒';
+            
+            // 添加动画效果高亮变化
+            highlightElement(inboundElement);
+            highlightElement(outboundElement);
+            highlightElement(blockedElement);
+            highlightElement(inboundBytesPerSecElement);
+            highlightElement(outboundBytesPerSecElement);
+        } else if (stats) {
+            // 否则使用数据库统计
+            inboundElement.textContent = stats.inbound_packets + ' 包';
+            outboundElement.textContent = stats.outbound_packets + ' 包';
+            blockedElement.textContent = stats.blocked_packets + ' 包';
+            inboundBytesPerSecElement.textContent = stats.inbound_bytes_per_sec.toFixed(2) + ' 字节/秒';
+            outboundBytesPerSecElement.textContent = stats.outbound_bytes_per_sec.toFixed(2) + ' 字节/秒';
+        }
+    }
+    
+    // 高亮元素动画
+    function highlightElement(element) {
+        element.classList.add('highlight-change');
+        setTimeout(() => {
+            element.classList.remove('highlight-change');
+        }, 1000);
+    }
+    
+    // 更新告警信息
+    function updateAlerts(alerts) {
+        if (!alerts) return;
+        
+        // 更新未读告警数
+        document.getElementById('unreadAlertsCount').textContent = alerts.unread_count;
+        
+        // 更新最近告警列表
+        const alertsContainer = document.getElementById('alertsCard');
+        const recentAlertsDiv = alertsContainer.querySelector('.mt-3');
+        
+        if (alerts.recent.length > 0) {
+            // 如果有告警数据，但尚未创建容器，则创建
+            if (!recentAlertsDiv) {
+                const newRecentAlertsDiv = document.createElement('div');
+                newRecentAlertsDiv.className = 'mt-3';
+                newRecentAlertsDiv.innerHTML = '<strong>最近告警:</strong>';
+                
+                const alertsList = document.createElement('ul');
+                alertsList.className = 'list-group list-group-flush';
+                
+                newRecentAlertsDiv.appendChild(alertsList);
+                alertsContainer.appendChild(newRecentAlertsDiv);
+            }
+            
+            // 获取或创建的警报列表元素
+            const alertsList = recentAlertsDiv ? 
+                recentAlertsDiv.querySelector('ul.list-group') : 
+                alertsContainer.querySelector('ul.list-group');
+            
+            if (alertsList) {
+                let alertsHTML = '';
+                alerts.recent.forEach(alert => {
+                    const alertClass = alert.is_read ? '' : 'list-group-item-warning';
+                    alertsHTML += `
+                        <li class="list-group-item ${alertClass}">
+                            <small class="text-muted">${alert.timestamp}</small>
+                            <div>${alert.title}</div>
+                        </li>
+                    `;
+                });
+                alertsList.innerHTML = alertsHTML;
+            }
+            
+            // 隐藏"暂无告警"消息
+            const noAlertsMsg = alertsContainer.querySelector('p.text-muted');
+            if (noAlertsMsg) {
+                noAlertsMsg.style.display = 'none';
+            }
+        } else {
+            // 如果没有告警数据，显示"暂无告警"消息
+            let noAlertsMsg = alertsContainer.querySelector('p.text-muted');
+            if (!noAlertsMsg) {
+                noAlertsMsg = document.createElement('p');
+                noAlertsMsg.className = 'text-muted';
+                noAlertsMsg.textContent = '暂无告警';
+                alertsContainer.appendChild(noAlertsMsg);
+            } else {
+                noAlertsMsg.style.display = 'block';
+            }
+            
+            // 隐藏最近告警容器
+            if (recentAlertsDiv) {
+                recentAlertsDiv.style.display = 'none';
+            }
+        }
+    }
+    
+    // 更新最常用规则
+    function updateTopRules(rules) {
+        if (!rules) return;
+        
+        const rulesContainer = document.getElementById('topRulesCard');
+        const rulesList = rulesContainer.querySelector('ul.list-group');
+        
+        if (rules.length > 0) {
+            if (!rulesList) {
+                // 如果列表不存在，创建一个新的
+                const newRulesList = document.createElement('ul');
+                newRulesList.className = 'list-group list-group-flush';
+                rulesContainer.innerHTML = '';
+                rulesContainer.appendChild(newRulesList);
+            }
+            
+            let rulesHTML = '';
+            rules.forEach(rule => {
+                rulesHTML += `
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <a href="/rules/detail/${rule.id}/">${rule.name}</a>
+                        <span class="badge bg-primary rounded-pill">${rule.hits} 次命中</span>
+                    </li>
+                `;
+            });
+            
+            if (rulesList) {
+                rulesList.innerHTML = rulesHTML;
+            } else {
+                rulesContainer.querySelector('ul.list-group').innerHTML = rulesHTML;
+            }
+            
+            // 隐藏"暂无规则"消息
+            const noRulesMsg = rulesContainer.querySelector('p.text-muted');
+            if (noRulesMsg) {
+                noRulesMsg.style.display = 'none';
+            }
+        } else {
+            // 如果没有规则，显示提示信息
+            rulesContainer.innerHTML = '<p class="text-muted">暂无规则使用数据</p>';
+        }
+    }
+    
+    // 更新最近数据包
+    function updateRecentPackets(packets) {
+        const packetsContainer = document.getElementById('recentPacketsCard');
+        const loadingSpinner = document.getElementById('packetsLoadingSpinner');
+        const packetsContent = document.getElementById('packetsContent');
+        const noPacketsMessage = document.getElementById('noPacketsMessage');
+        
+        // 隐藏加载动画
+        if (loadingSpinner) {
+            loadingSpinner.style.display = 'none';
+        }
+        
+        if (packets && packets.length > 0) {
+            // 显示数据包表格
+            if (packetsContent) {
+                packetsContent.style.display = 'block';
+            }
+            
+            // 隐藏"暂无数据"消息
+            if (noPacketsMessage) {
+                noPacketsMessage.style.display = 'none';
+            }
+            
+            // 更新表格内容
+            const tableBody = document.getElementById('recentPacketsTable');
+            let tableHTML = '';
+            
+            packets.forEach(packet => {
+                let statusBadge = '';
+                
+                switch(packet.status) {
+                    case 'ALLOWED':
+                        statusBadge = '<span class="badge bg-success">允许</span>';
+                        break;
+                    case 'BLOCKED':
+                        statusBadge = '<span class="badge bg-danger">阻止</span>';
+                        break;
+                    case 'SUSPICIOUS':
+                        statusBadge = '<span class="badge bg-warning">可疑</span>';
+                        break;
+                    default:
+                        statusBadge = '<span class="badge bg-secondary">未知</span>';
+                }
+                
+                tableHTML += `
+                    <tr>
+                        <td>${packet.timestamp}</td>
+                        <td>${packet.src_ip}</td>
+                        <td>${packet.dst_ip}</td>
+                        <td>${statusBadge}</td>
+                    </tr>
+                `;
+            });
+            
+            tableBody.innerHTML = tableHTML;
+        } else {
+            // 隐藏表格，显示"暂无数据"消息
+            if (packetsContent) {
+                packetsContent.style.display = 'none';
+            }
+            
+            if (noPacketsMessage) {
+                noPacketsMessage.style.display = 'block';
+            }
+        }
+    }
+});
+
+// 添加CSS动画样式
+document.addEventListener('DOMContentLoaded', function() {
+    const style = document.createElement('style');
+    style.textContent = `
+        .highlight-change {
+            animation: highlight 1s ease;
+        }
+        
+        @keyframes highlight {
+            0% { background-color: rgba(255, 255, 0, 0.5); }
+            100% { background-color: transparent; }
+        }
+    `;
+    document.head.appendChild(style);
+});
+
+// 初始化流量图表
+let trafficChart = null;
+let currentTimeRange = '1h';
+const MAX_DATA_POINTS = 60; // 1小时的数据点
+
+function initTrafficChart() {
+    const ctx = document.getElementById('trafficChart').getContext('2d');
+    
+    trafficChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [
+                {
+                    label: '入站流量 (B/s)',
+                    data: [],
+                    borderColor: '#2ecc71',
+                    backgroundColor: 'rgba(46, 204, 113, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.4,
+                    fill: true
+                },
+                {
+                    label: '出站流量 (B/s)',
+                    data: [],
+                    borderColor: '#e74c3c',
+                    backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.4,
+                    fill: true
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'top',
+                },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    callbacks: {
+                        label: function(context) {
+                            return `${context.dataset.label}: ${formatBytes(context.raw)}/s`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: {
+                        display: false
+                    },
+                    ticks: {
+                        maxRotation: 0,
+                        callback: function(value, index) {
+                            return formatTime(this.getLabelForValue(value));
+                        }
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function(value) {
+                            return formatBytes(value) + '/s';
+                        }
+                    }
+                }
+            },
+            interaction: {
+                mode: 'nearest',
+                axis: 'x',
+                intersect: false
+            }
+        }
+    });
+}
+
+// 格式化字节大小
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// 格式化时间
+function formatTime(timestamp) {
+    const date = new Date(timestamp);
+    return date.getHours().toString().padStart(2, '0') + ':' + 
+           date.getMinutes().toString().padStart(2, '0') + ':' +
+           date.getSeconds().toString().padStart(2, '0');
+}
+
+// 更新流量图表
+function updateTrafficChart(data) {
+    if (!trafficChart) return;
+    
+    const now = new Date();
+    const stats = data.real_time_stats || data.traffic_stats;
+    if (!stats) return;
+    
+    // 添加新数据点
+    trafficChart.data.labels.push(now);
+    trafficChart.data.datasets[0].data.push(stats.inbound_bytes_per_sec || stats.inbound_bytes || 0);
+    trafficChart.data.datasets[1].data.push(stats.outbound_bytes_per_sec || stats.outbound_bytes || 0);
+    
+    // 限制数据点数量
+    if (trafficChart.data.labels.length > MAX_DATA_POINTS) {
+        trafficChart.data.labels.shift();
+        trafficChart.data.datasets[0].data.shift();
+        trafficChart.data.datasets[1].data.shift();
+    }
+    
+    // 更新统计信息
+    updateTrafficStats(stats);
+    
+    // 更新图表
+    trafficChart.update();
+}
+
+// 更新流量统计信息
+function updateTrafficStats(stats) {
+    const inboundBytes = stats.inbound_bytes_per_sec || stats.inbound_bytes || 0;
+    const outboundBytes = stats.outbound_bytes_per_sec || stats.outbound_bytes || 0;
+    const totalBytes = inboundBytes + outboundBytes;
+    
+    document.getElementById('inboundTraffic').textContent = formatBytes(inboundBytes) + '/s';
+    document.getElementById('outboundTraffic').textContent = formatBytes(outboundBytes) + '/s';
+    document.getElementById('totalTraffic').textContent = formatBytes(totalBytes) + '/s';
+    
+    // 计算变化率（这里简化处理，实际应该与之前的数据比较）
+    document.getElementById('inboundChange').textContent = '+0%';
+    document.getElementById('outboundChange').textContent = '+0%';
+    document.getElementById('totalChange').textContent = '+0%';
+}
+
+// 切换时间范围
+function changeTimeRange(range) {
+    const now = new Date();
+    const hour = 60 * 60 * 1000;  // 1小时
+    const sixHours = 6 * hour;     // 6小时
+    const day = 24 * hour;         // 24小时
+    
+    let startTime;
+    switch (range) {
+        case '1h':
+            startTime = new Date(now.getTime() - hour);
+            break;
+        case '6h':
+            startTime = new Date(now.getTime() - sixHours);
+            break;
+        case '24h':
+            startTime = new Date(now.getTime() - day);
+            break;
+        default:
+            startTime = new Date(now.getTime() - hour);
+    }
+    
+    // 更新图表数据
+    if (trafficChart) {
+        trafficChart.data.labels = [];
+        trafficChart.data.datasets[0].data = [];
+        trafficChart.data.datasets[1].data = [];
+        
+        // 获取历史数据
+        fetch(`/dashboard/traffic-stats/?start_time=${startTime.toISOString()}`)
+            .then(response => response.json())
+            .then(data => {
+                data.forEach(stat => {
+                    const timestamp = new Date(stat.timestamp);
+                    trafficChart.data.labels.push(timestamp);
+                    trafficChart.data.datasets[0].data.push(stat.inbound_bytes_per_sec || stat.inbound_bytes || 0);
+                    trafficChart.data.datasets[1].data.push(stat.outbound_bytes_per_sec || stat.outbound_bytes || 0);
+                });
+                
+                trafficChart.update();
+            })
+            .catch(error => {
+                console.error('获取历史数据失败:', error);
+            });
+    }
+}
+
+// 初始化图表
+document.addEventListener('DOMContentLoaded', function() {
+    initTrafficChart();
+});
+
+// 初始化仪表盘
+function initDashboard() {
+    // 初始化流量图表
+    initTrafficChart();
+    
+    // 获取初始数据
+    updateDashboard();
+    
+    // 设置定时更新
+    setInterval(updateDashboard, 5000);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    initDashboard();
+});
+</script>
+{% endblock %} 

@@ -1,0 +1,203 @@
+{% extends 'base/base.html' %}
+
+{% block title %}数据包列表 - DPI防火墙系统{% endblock %}
+
+{% block page_title %}数据包列表{% endblock %}
+
+{% block page_actions %}
+<div class="alert alert-info p-2 mb-0">
+    <i class="fas fa-info-circle me-1"></i> 数据包捕获功能已移至命令行，请使用<code>python manage.py firewall_service</code>
+</div>
+{% endblock %}
+
+{% block content %}
+<!-- 筛选表单 -->
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="fas fa-filter me-2"></i>过滤选项
+    </div>
+    <div class="card-body">
+        <form method="get" class="row g-3">
+            <div class="col-md-4">
+                <div class="input-group">
+                    <input type="text" class="form-control" name="q" value="{{ search_query }}" placeholder="搜索IP...">
+                    <button class="btn btn-outline-secondary" type="submit">
+                        <i class="fas fa-search"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="col-md-2">
+                <select class="form-select" name="protocol" onchange="this.form.submit()">
+                    <option value="">全部协议</option>
+                    {% for protocol in protocols %}
+                    <option value="{{ protocol.name }}" {% if protocol_filter == protocol.name %}selected{% endif %}>
+                        {{ protocol.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <div class="col-md-2">
+                <select class="form-select" name="status" onchange="this.form.submit()">
+                    <option value="">全部状态</option>
+                    <option value="allowed" {% if status_filter == 'allowed' %}selected{% endif %}>已允许</option>
+                    <option value="blocked" {% if status_filter == 'blocked' %}selected{% endif %}>已阻止</option>
+                    <option value="suspicious" {% if status_filter == 'suspicious' %}selected{% endif %}>可疑</option>
+                </select>
+            </div>
+            
+            <div class="col-md-2">
+                <select class="form-select" name="direction" onchange="this.form.submit()">
+                    <option value="">全部方向</option>
+                    <option value="inbound" {% if direction_filter == 'inbound' %}selected{% endif %}>入站</option>
+                    <option value="outbound" {% if direction_filter == 'outbound' %}selected{% endif %}>出站</option>
+                </select>
+            </div>
+            
+            <div class="col-md-2">
+                <a href="{% url 'packet_list' %}" class="btn btn-outline-secondary w-100">
+                    <i class="fas fa-times me-1"></i>清除筛选
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 数据包表格 -->
+<div class="card">
+    <div class="card-header">
+        <div class="d-flex justify-content-between align-items-center">
+            <span><i class="fas fa-list me-2"></i>数据包列表</span>
+            <span class="badge bg-secondary">{{ page_obj.paginator.count }} 个数据包</span>
+        </div>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-striped table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>时间</th>
+                        <th>源IP:端口</th>
+                        <th>目标IP:端口</th>
+                        <th>协议</th>
+                        <th>方向</th>
+                        <th>状态</th>
+                        <th>大小(字节)</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for packet in page_obj %}
+                    <tr>
+                        <td>{{ packet.timestamp|date:"Y-m-d H:i:s" }}</td>
+                        <td>{{ packet.source_ip }}:{{ packet.source_port }}</td>
+                        <td>{{ packet.destination_ip }}:{{ packet.destination_port }}</td>
+                        <td>
+                            {% if packet.protocol %}
+                            <span class="badge bg-info">{{ packet.protocol.name }}</span>
+                            {% else %}
+                            <span class="badge bg-secondary">未知</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if packet.direction == 'inbound' %}
+                            <span class="badge bg-primary">入站</span>
+                            {% else %}
+                            <span class="badge bg-success">出站</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if packet.status == 'allowed' %}
+                            <span class="badge bg-success">已允许</span>
+                            {% elif packet.status == 'blocked' %}
+                            <span class="badge bg-danger">已阻止</span>
+                            {% else %}
+                            <span class="badge bg-warning">可疑</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ packet.packet_size }}</td>
+                        <td>
+                            <a href="{% url 'packet_detail' packet.id %}" class="btn btn-sm btn-outline-primary">
+                                <i class="fas fa-eye"></i>
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="8" class="text-center py-4">
+                            <div class="text-muted">
+                                <i class="fas fa-info-circle me-2"></i>没有找到数据包记录
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <!-- 分页 -->
+    {% if page_obj.has_other_pages %}
+    <div class="card-footer">
+        <nav>
+            <ul class="pagination justify-content-center mb-0">
+                {% if page_obj.has_previous %}
+                <li class="page-item">
+                    <a class="page-link" href="?page=1{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if direction_filter %}&direction={{ direction_filter }}{% endif %}{% if protocol_filter %}&protocol={{ protocol_filter }}{% endif %}">
+                        <i class="fas fa-angle-double-left"></i>
+                    </a>
+                </li>
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if direction_filter %}&direction={{ direction_filter }}{% endif %}{% if protocol_filter %}&protocol={{ protocol_filter }}{% endif %}">
+                        <i class="fas fa-angle-left"></i>
+                    </a>
+                </li>
+                {% else %}
+                <li class="page-item disabled">
+                    <span class="page-link"><i class="fas fa-angle-double-left"></i></span>
+                </li>
+                <li class="page-item disabled">
+                    <span class="page-link"><i class="fas fa-angle-left"></i></span>
+                </li>
+                {% endif %}
+                
+                {% for i in page_obj.paginator.page_range %}
+                    {% if page_obj.number == i %}
+                    <li class="page-item active">
+                        <span class="page-link">{{ i }}</span>
+                    </li>
+                    {% elif i > page_obj.number|add:'-3' and i < page_obj.number|add:'3' %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ i }}{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if direction_filter %}&direction={{ direction_filter }}{% endif %}{% if protocol_filter %}&protocol={{ protocol_filter }}{% endif %}">
+                            {{ i }}
+                        </a>
+                    </li>
+                    {% endif %}
+                {% endfor %}
+                
+                {% if page_obj.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if direction_filter %}&direction={{ direction_filter }}{% endif %}{% if protocol_filter %}&protocol={{ protocol_filter }}{% endif %}">
+                        <i class="fas fa-angle-right"></i>
+                    </a>
+                </li>
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if direction_filter %}&direction={{ direction_filter }}{% endif %}{% if protocol_filter %}&protocol={{ protocol_filter }}{% endif %}">
+                        <i class="fas fa-angle-double-right"></i>
+                    </a>
+                </li>
+                {% else %}
+                <li class="page-item disabled">
+                    <span class="page-link"><i class="fas fa-angle-right"></i></span>
+                </li>
+                <li class="page-item disabled">
+                    <span class="page-link"><i class="fas fa-angle-double-right"></i></span>
+                </li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+{% endblock %} 

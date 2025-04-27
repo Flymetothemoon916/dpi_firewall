@@ -1,0 +1,62 @@
+{% extends 'base/base.html' %}
+{% load static %}
+
+{% block title %}告警日志{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-bell"></i> 告警列表
+        </div>
+        <div class="card-body">
+            {% if alerts %}
+                <div class="table-responsive">
+                    <table class="table table-hover table-striped">
+                        <thead>
+                            <tr>
+                                <th>时间</th>
+                                <th>级别</th>
+                                <th>标题</th>
+                                <th>描述</th>
+                                <th>源IP</th>
+                                <th>状态</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for alert in alerts %}
+                            <tr>
+                                <td>{{ alert.timestamp|date:"Y-m-d H:i:s" }}</td>
+                                <td>
+                                    {% if alert.level == 'critical' %}
+                                    <span class="badge bg-danger">严重</span>
+                                    {% elif alert.level == 'warning' %}
+                                    <span class="badge bg-warning text-dark">警告</span>
+                                    {% else %}
+                                    <span class="badge bg-info">信息</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ alert.title }}</td>
+                                <td>{{ alert.description }}</td>
+                                <td>{{ alert.source_ip|default:"-" }}</td>
+                                <td>
+                                    {% if alert.is_read %}
+                                    <span class="badge bg-secondary">已读</span>
+                                    {% else %}
+                                    <span class="badge bg-success">未读</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="alert alert-info">
+                    没有告警记录
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,178 @@
+{% extends 'base/base.html' %}
+{% load static %}
+
+{% block title %}防火墙规则管理{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+        <h1 class="h2">防火墙规则管理</h1>
+        <div class="btn-toolbar mb-2 mb-md-0">
+            <a href="{% url 'rule_create' %}" class="btn btn-sm btn-primary">
+                <i class="fas fa-plus"></i> 添加新规则
+            </a>
+        </div>
+    </div>
+
+    <!-- 筛选和搜索 -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <i class="fas fa-filter"></i> 筛选规则
+        </div>
+        <div class="card-body">
+            <form method="get" action="{% url 'rule_list' %}" class="row g-3">
+                <div class="col-md-3">
+                    <label for="q" class="form-label">搜索</label>
+                    <input type="text" class="form-control" id="q" name="q" value="{{ search_query }}" placeholder="规则名称、描述或IP">
+                </div>
+                <div class="col-md-2">
+                    <label for="category" class="form-label">规则分类</label>
+                    <select class="form-select" id="category" name="category">
+                        <option value="">全部分类</option>
+                        {% for category in categories %}
+                        <option value="{{ category.id }}" {% if category_filter == category.id|stringformat:"i" %}selected{% endif %}>{{ category.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label for="status" class="form-label">状态</label>
+                    <select class="form-select" id="status" name="status">
+                        <option value="">全部状态</option>
+                        <option value="enabled" {% if status_filter == 'enabled' %}selected{% endif %}>已启用</option>
+                        <option value="disabled" {% if status_filter == 'disabled' %}selected{% endif %}>已禁用</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label for="action" class="form-label">动作</label>
+                    <select class="form-select" id="action" name="action">
+                        <option value="">全部动作</option>
+                        <option value="allow" {% if action_filter == 'allow' %}selected{% endif %}>允许</option>
+                        <option value="block" {% if action_filter == 'block' %}selected{% endif %}>阻止</option>
+                        <option value="log" {% if action_filter == 'log' %}selected{% endif %}>仅记录</option>
+                        <option value="alert" {% if action_filter == 'alert' %}selected{% endif %}>告警</option>
+                    </select>
+                </div>
+                <div class="col-md-3 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary me-2">应用筛选</button>
+                    <a href="{% url 'rule_list' %}" class="btn btn-outline-secondary">清除筛选</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 规则列表 -->
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-list"></i> 规则列表
+            <span class="badge bg-primary">{{ page_obj.paginator.count }} 条规则</span>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover table-striped">
+                    <thead>
+                        <tr>
+                            <th>状态</th>
+                            <th>规则名称</th>
+                            <th>分类</th>
+                            <th>源IP</th>
+                            <th>源端口</th>
+                            <th>目标IP</th>
+                            <th>目标端口</th>
+                            <th>协议</th>
+                            <th>动作</th>
+                            <th>优先级</th>
+                            <th>命中次数</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for rule in page_obj %}
+                        <tr>
+                            <td>
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input rule-toggle" type="checkbox" id="rule-{{ rule.id }}"
+                                        data-rule-id="{{ rule.id }}" {% if rule.is_enabled %}checked{% endif %}>
+                                </div>
+                            </td>
+                            <td><a href="{% url 'rule_detail' rule.id %}">{{ rule.name }}</a></td>
+                            <td>{{ rule.category.name|default:"-" }}</td>
+                            <td>{{ rule.source_ip|default:"任意" }}</td>
+                            <td>{{ rule.source_port|default:"任意" }}</td>
+                            <td>{{ rule.destination_ip|default:"任意" }}</td>
+                            <td>{{ rule.destination_port|default:"任意" }}</td>
+                            <td>{{ rule.protocol|default:"任意" }}</td>
+                            <td>
+                                {% if rule.action == 'allow' %}
+                                <span class="badge bg-success">允许</span>
+                                {% elif rule.action == 'block' %}
+                                <span class="badge bg-danger">阻止</span>
+                                {% elif rule.action == 'log' %}
+                                <span class="badge bg-info">记录</span>
+                                {% elif rule.action == 'alert' %}
+                                <span class="badge bg-warning">告警</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if rule.priority == 'low' %}
+                                <span class="badge bg-secondary">低</span>
+                                {% elif rule.priority == 'medium' %}
+                                <span class="badge bg-primary">中</span>
+                                {% elif rule.priority == 'high' %}
+                                <span class="badge bg-warning">高</span>
+                                {% elif rule.priority == 'critical' %}
+                                <span class="badge bg-danger">严重</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ rule.hits }}</td>
+                            <td>
+                                <a href="{% url 'rule_edit' rule.id %}" class="btn btn-sm btn-outline-primary">
+                                    <i class="fas fa-edit"></i>
+                                </a>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="12" class="text-center py-4">没有找到符合条件的规则</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card-footer">
+            {% include 'base/pagination.html' with page_obj=page_obj %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    $(document).ready(function() {
+        // 规则启用/禁用切换
+        $('.rule-toggle').change(function() {
+            const ruleId = $(this).data('rule-id');
+            const enabled = $(this).prop('checked');
+            
+            $.ajax({
+                url: `/rules/${ruleId}/toggle/`,
+                method: 'GET',
+                success: function(response) {
+                    if (response.status === 'success') {
+                        toastr.success(response.message);
+                    } else {
+                        toastr.error('操作失败，请重试');
+                        // 恢复开关状态
+                        $(`#rule-${ruleId}`).prop('checked', !enabled);
+                    }
+                },
+                error: function() {
+                    toastr.error('操作失败，请重试');
+                    // 恢复开关状态
+                    $(`#rule-${ruleId}`).prop('checked', !enabled);
+                }
+            });
+        });
+    });
+</script>
+{% endblock %} 

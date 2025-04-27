@@ -1,0 +1,210 @@
+{% extends 'base/base.html' %}
+{% load static %}
+
+{% block title %}{{ rule.name }} - 规则详情{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+        <h1 class="h2">规则详情</h1>
+        <div class="btn-toolbar mb-2 mb-md-0">
+            <a href="{% url 'rule_edit' rule.id %}" class="btn btn-sm btn-primary me-2">
+                <i class="fas fa-edit"></i> 编辑规则
+            </a>
+            <a href="{% url 'rule_list' %}" class="btn btn-sm btn-outline-secondary">
+                <i class="fas fa-arrow-left"></i> 返回列表
+            </a>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-8">
+            <!-- 基本信息 -->
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div>
+                        <i class="fas fa-info-circle"></i> 基本信息
+                    </div>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input rule-toggle" type="checkbox" id="rule-{{ rule.id }}"
+                            data-rule-id="{{ rule.id }}" {% if rule.is_enabled %}checked{% endif %}>
+                        <label class="form-check-label" for="rule-{{ rule.id }}">
+                            {% if rule.is_enabled %}已启用{% else %}已禁用{% endif %}
+                        </label>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="row mb-3">
+                        <div class="col-md-3 fw-bold">规则名称:</div>
+                        <div class="col-md-9">{{ rule.name }}</div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-3 fw-bold">规则分类:</div>
+                        <div class="col-md-9">{{ rule.category.name|default:"未分类" }}</div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-3 fw-bold">规则说明:</div>
+                        <div class="col-md-9">{{ rule.description|linebreaks|default:"无描述" }}</div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-3 fw-bold">动作:</div>
+                        <div class="col-md-9">
+                            {% if rule.action == 'allow' %}
+                            <span class="badge bg-success">允许</span>
+                            {% elif rule.action == 'block' %}
+                            <span class="badge bg-danger">阻止</span>
+                            {% elif rule.action == 'log' %}
+                            <span class="badge bg-info">仅记录</span>
+                            {% elif rule.action == 'alert' %}
+                            <span class="badge bg-warning">告警</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-3 fw-bold">优先级:</div>
+                        <div class="col-md-9">
+                            {% if rule.priority == 'low' %}
+                            <span class="badge bg-secondary">低</span>
+                            {% elif rule.priority == 'medium' %}
+                            <span class="badge bg-primary">中</span>
+                            {% elif rule.priority == 'high' %}
+                            <span class="badge bg-warning">高</span>
+                            {% elif rule.priority == 'critical' %}
+                            <span class="badge bg-danger">严重</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-3 fw-bold">日志前缀:</div>
+                        <div class="col-md-9">{{ rule.log_prefix|default:"无" }}</div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-3 fw-bold">创建时间:</div>
+                        <div class="col-md-9">{{ rule.created_at|date:"Y-m-d H:i:s" }}</div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-3 fw-bold">更新时间:</div>
+                        <div class="col-md-9">{{ rule.updated_at|date:"Y-m-d H:i:s" }}</div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-3 fw-bold">命中次数:</div>
+                        <div class="col-md-9">{{ rule.hits }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 匹配条件 -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="fas fa-filter"></i> 匹配条件
+                </div>
+                <div class="card-body">
+                    <div class="row mb-3">
+                        <div class="col-md-3 fw-bold">源IP:</div>
+                        <div class="col-md-9">{{ rule.source_ip|default:"任意" }}</div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-3 fw-bold">目标IP:</div>
+                        <div class="col-md-9">{{ rule.destination_ip|default:"任意" }}</div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-3 fw-bold">源端口:</div>
+                        <div class="col-md-9">{{ rule.source_port|default:"任意" }}</div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-3 fw-bold">目标端口:</div>
+                        <div class="col-md-9">{{ rule.destination_port|default:"任意" }}</div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-3 fw-bold">协议:</div>
+                        <div class="col-md-9">{{ rule.protocol|default:"任意" }}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <!-- DPI相关配置 -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="fas fa-search-plus"></i> DPI检测配置
+                </div>
+                <div class="card-body">
+                    <div class="row mb-3">
+                        <div class="col-md-4 fw-bold">应用层协议:</div>
+                        <div class="col-md-8">{{ rule.application_protocol|default:"任意" }}</div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="fw-bold mb-2">检测模式:</div>
+                        {% if rule.pattern.all %}
+                        <ul class="list-group">
+                            {% for pattern in rule.pattern.all %}
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                {{ pattern.name }}
+                                <span class="badge bg-primary rounded-pill">{{ pattern.is_regex|yesno:"正则,文本" }}</span>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                        {% else %}
+                        <p class="text-muted">未设置检测模式</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- 关联信息 -->
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-link"></i> 关联信息
+                </div>
+                <div class="card-body">
+                    <p class="fw-bold">命中此规则的数据包:</p>
+                    {% if rule.matched_packets.exists %}
+                    <a href="/packets/?rule={{ rule.id }}" class="btn btn-outline-primary">
+                        查看 {{ rule.matched_packets.count }} 条匹配记录
+                    </a>
+                    {% else %}
+                    <p class="text-muted">暂无匹配记录</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    $(document).ready(function() {
+        // 规则启用/禁用切换
+        $('.rule-toggle').change(function() {
+            const ruleId = $(this).data('rule-id');
+            const enabled = $(this).prop('checked');
+            const label = $(this).next('label');
+            
+            label.text(enabled ? '已启用' : '已禁用');
+            
+            $.ajax({
+                url: `/rules/${ruleId}/toggle/`,
+                method: 'GET',
+                success: function(response) {
+                    if (response.status === 'success') {
+                        toastr.success(response.message);
+                    } else {
+                        toastr.error('操作失败，请重试');
+                        // 恢复开关状态
+                        $(`#rule-${ruleId}`).prop('checked', !enabled);
+                        label.text(!enabled ? '已启用' : '已禁用');
+                    }
+                },
+                error: function() {
+                    toastr.error('操作失败，请重试');
+                    // 恢复开关状态
+                    $(`#rule-${ruleId}`).prop('checked', !enabled);
+                    label.text(!enabled ? '已启用' : '已禁用');
+                }
+            });
+        });
+    });
+</script>
+{% endblock %} 

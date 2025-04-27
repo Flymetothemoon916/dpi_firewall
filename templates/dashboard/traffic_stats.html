@@ -1,0 +1,52 @@
+﻿{% extends 'base/base.html' %}
+{% load static %}
+
+{% block title %}流量统计{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-chart-line"></i> 流量统计
+        </div>
+        <div class="card-body">
+            {% if stats %}
+                <div class="table-responsive">
+                    <table class="table table-hover table-striped">
+                        <thead>
+                            <tr>
+                                <th>时间</th>
+                                <th>入站数据包数</th>
+                                <th>出站数据包数</th>
+                                <th>入站流量</th>
+                                <th>出站流量</th>
+                                <th>入站流量(字节/秒)</th>
+                                <th>出站流量(字节/秒)</th>
+                                <th>拦截数据包数</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for stat in stats %}
+                            <tr>
+                                <td>{{ stat.timestamp|date:"Y-m-d H:i:s" }}</td>
+                                <td>{{ stat.inbound_packets }}</td>
+                                <td>{{ stat.outbound_packets }}</td>
+                                <td>{{ stat.inbound_bytes }} 字节</td>
+                                <td>{{ stat.outbound_bytes }} 字节</td>
+                                <td>{{ stat.inbound_bytes_per_sec|floatformat:2 }} 字节/秒</td>
+                                <td>{{ stat.outbound_bytes_per_sec|floatformat:2 }} 字节/秒</td>
+                                <td>{{ stat.blocked_packets }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="alert alert-info">
+                    没有流量统计数据
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
