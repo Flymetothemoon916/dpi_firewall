@@ -2,6 +2,7 @@ from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.utils import timezone
+import psutil
 
 from .models import SystemStatus, TrafficStatistics, AlertLog
 from packet_analyzer.models import PacketLog
@@ -17,6 +18,15 @@ def dashboard(request):
         system_status = SystemStatus.objects.first()
         if not system_status:
             system_status = SystemStatus.objects.create()
+            
+        # 更新CPU和内存使用率
+        cpu_usage = psutil.cpu_percent(interval=0.5)
+        memory = psutil.virtual_memory()
+        memory_usage = memory.percent
+        
+        system_status.cpu_usage = cpu_usage
+        system_status.memory_usage = memory_usage
+        system_status.save()
             
         # 添加提示信息，指导用户使用命令行
         cli_instructions = {
@@ -119,8 +129,20 @@ def traffic_stats(request):
 def get_dashboard_data(request):
     """API端点，返回仪表盘最新数据，用于AJAX实时更新"""
     try:
+        import psutil
+        
         # 获取系统状态
         system_status = SystemStatus.objects.first()
+        
+        # 更新CPU和内存使用率
+        if system_status:
+            cpu_usage = psutil.cpu_percent(interval=0.1)
+            memory = psutil.virtual_memory()
+            memory_usage = memory.percent
+            
+            system_status.cpu_usage = cpu_usage
+            system_status.memory_usage = memory_usage
+            system_status.save()
         
         # 获取最近的流量统计
         traffic_stats = TrafficStatistics.objects.order_by('-timestamp').first()
@@ -137,7 +159,7 @@ def get_dashboard_data(request):
                 'level': alert.level
             })
         
-        # 获取数据包统计信息
+        # 获取数据包统计信息 - 使用正确的状态名称
         total_packets = PacketLog.objects.count()
         allowed_packets = PacketLog.objects.filter(status='allowed').count()
         blocked_packets = PacketLog.objects.filter(status='blocked').count()
@@ -199,9 +221,6 @@ def get_dashboard_data(request):
                 }
         except Exception as e:
             # 记录错误但不中断处理
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.exception(f"获取实时统计数据失败: {str(e)}")
             real_stats = None
         
         # 构建返回数据
@@ -239,9 +258,6 @@ def get_dashboard_data(request):
         
         return JsonResponse(data)
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.exception(f"获取仪表盘数据失败: {str(e)}")
         return JsonResponse({'error': str(e)}, status=500)
 
 
@@ -272,13 +288,24 @@ def get_performance_data(request):
         
         # 获取进程性能指标
         process = psutil.Process()
+        
+        # 使用全局系统CPU和内存使用率，而不是仅进程使用率
+        cpu_usage = psutil.cpu_percent(interval=0.5)  # 获取系统总体CPU使用率
+        memory = psutil.virtual_memory()
+        memory_usage = memory.percent  # 获取系统总体内存使用率
+        
         process_stats = {
-            'cpu_usage': process.cpu_percent(),
-            'memory_usage': process.memory_percent(),
+            'cpu_usage': process.cpu_percent(interval=0.1),  # 进程CPU使用率
+            'memory_usage': process.memory_percent(),  # 进程内存使用率
             'threads': len(process.threads()),
             'open_files': len(process.open_files()),
             'connections': len(process.connections()),
         }
+        
+        # 更新系统状态中的CPU和内存使用率
+        system_status.cpu_usage = cpu_usage
+        system_status.memory_usage = memory_usage
+        system_status.save()
         
         # 获取系统网络接口统计信息
         net_io_counters = psutil.net_io_counters()
@@ -319,9 +346,6 @@ def get_performance_data(request):
                 }
         except Exception as e:
             # 记录异常但继续处理
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.exception(f"获取数据包处理性能统计失败: {str(e)}")
             packet_processing_stats = {
                 'packets_per_second': 0,
                 'avg_processing_time': 0,
@@ -352,7 +376,7 @@ def get_performance_data(request):
         # 计算阻断率
         from packet_analyzer.models import PacketLog
         total_packets = PacketLog.objects.count()
-        blocked_packets = PacketLog.objects.filter(status='blocked').count()
+        blocked_packets = PacketLog.objects.filter(status='block').count()
         block_rate = (blocked_packets / total_packets * 100) if total_packets > 0 else 0
         
         # 计算规则命中率
@@ -419,11 +443,34 @@ def get_performance_data(request):
         
         return JsonResponse(data)
     except Exception as e:
-        import logging
-        import traceback
-        logger = logging.getLogger(__name__)
-        logger.exception(f"获取性能监控数据失败: {str(e)}")
         return JsonResponse({
-            'error': str(e), 
-            'traceback': traceback.format_exc()
+            'error': str(e)
         }, status=500)
+
+
+@login_required
+def reset_packet_stats(request):
+    """清除所有数据包统计并重新开始计数"""
+    if request.method == 'POST':
+        try:
+            # 清除PacketLog表中的所有记录
+            from packet_analyzer.models import PacketLog
+            PacketLog.objects.all().delete()
+            
+            # 重置流量统计
+            from .models import TrafficStatistics
+            TrafficStatistics.objects.all().update(
+                inbound_packets=0,
+                outbound_packets=0,
+                inbound_bytes=0,
+                outbound_bytes=0,
+                inbound_bytes_per_sec=0,
+                outbound_bytes_per_sec=0,
+                blocked_packets=0
+            )
+            
+            return JsonResponse({'status': 'success', 'message': '数据包统计已清除'})
+        except Exception as e:
+            return JsonResponse({'status': 'error', 'message': f'清除数据包统计时出错: {str(e)}'}, status=500)
+    else:
+        return JsonResponse({'status': 'error', 'message': '仅支持POST请求'}, status=405)

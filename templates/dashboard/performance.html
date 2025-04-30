@@ -33,12 +33,6 @@
                         <div id="memoryUsageBar" class="progress-bar bg-info" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
                     </div>
                 </div>
-                <div class="mb-3">
-                    <span>进程资源使用率:</span>
-                    <div class="progress mt-2">
-                        <div id="processUsageBar" class="progress-bar bg-warning" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
-                    </div>
-                </div>
                 <div class="row text-center mt-3">
                     <div class="col-md-4">
                         <div class="card bg-light">
@@ -426,11 +420,9 @@
         // 更新系统资源使用率
         const cpuUsage = data.system_status.cpu_usage || 0;
         const memoryUsage = data.system_status.memory_usage || 0;
-        const processUsage = data.process_stats ? data.process_stats.cpu_usage || 0 : 0;
         
         $('#cpuUsageBar').css('width', `${cpuUsage}%`).attr('aria-valuenow', cpuUsage).text(`${cpuUsage.toFixed(1)}%`);
         $('#memoryUsageBar').css('width', `${memoryUsage}%`).attr('aria-valuenow', memoryUsage).text(`${memoryUsage.toFixed(1)}%`);
-        $('#processUsageBar').css('width', `${processUsage}%`).attr('aria-valuenow', processUsage).text(`${processUsage.toFixed(1)}%`);
         
         // 更新其他系统指标
         $('#threadsCount').text(data.process_stats ? data.process_stats.threads || 0 : 0);

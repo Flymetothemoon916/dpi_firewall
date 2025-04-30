@@ -36,7 +36,7 @@ class SystemStatus(models.Model):
 
 class TrafficStatistics(models.Model):
     """流量统计模型，记录网络流量统计信息"""
-    timestamp = models.DateTimeField(verbose_name='统计时间', default=timezone.now)
+    timestamp = models.DateTimeField(verbose_name='统计时间', default=timezone.now, db_index=True)
     inbound_packets = models.BigIntegerField(verbose_name='入站数据包数', default=0)
     outbound_packets = models.BigIntegerField(verbose_name='出站数据包数', default=0)
     inbound_bytes = models.BigIntegerField(verbose_name='入站流量(字节)', default=0)
@@ -68,7 +68,7 @@ class AlertLog(models.Model):
         (CRITICAL, '严重'),
     ]
     
-    timestamp = models.DateTimeField(verbose_name='告警时间', default=timezone.now)
+    timestamp = models.DateTimeField(verbose_name='告警时间', default=timezone.now, db_index=True)
     level = models.CharField(
         max_length=10,
         choices=LEVEL_CHOICES,

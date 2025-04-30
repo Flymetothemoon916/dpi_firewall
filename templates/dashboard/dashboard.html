@@ -11,6 +11,7 @@
 {% endblock %}
 
 {% block content %}
+{% csrf_token %}
 <div class="row">
     <!-- 系统状态卡片 -->
     <div class="col-md-6 col-lg-3">
@@ -72,6 +73,11 @@
                         <span class="badge bg-warning rounded-pill" id="suspiciousPackets">{{ suspicious_packets|default:'0' }}</span>
                     </li>
                 </ul>
+                <div class="text-center mt-3">
+                    <button id="resetPacketStats" class="btn btn-sm btn-danger">
+                        <i class="fas fa-trash-alt me-1"></i> 清除统计
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -270,6 +276,28 @@
     font-size: 14px;
     margin-top: 5px;
 }
+
+/* 修改进度条颜色，降低亮度以便更好观察 */
+#systemStatusCard .progress-bar {
+    background-color: #5a6268; /* 深灰色替代默认的亮蓝色 */
+    color: white;
+    font-weight: bold;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.3); /* 添加文字阴影增强可读性 */
+}
+
+#systemStatusCard .progress-bar.bg-info {
+    background-color: #17a2b8; /* 保持信息类颜色不变 */
+}
+
+/* 高亮变化的颜色调整 */
+.highlight-change {
+    animation: highlight 1s ease;
+}
+
+@keyframes highlight {
+    0% { background-color: rgba(90, 98, 104, 0.3); } /* 降低高亮的亮度 */
+    100% { background-color: transparent; }
+}
 </style>
 
 <script>
@@ -281,7 +309,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // 自动刷新相关
     let autoRefreshEnabled = true;
     let refreshInterval = null;
-    const refreshTime = 2000; // 2秒刷新一次
+    const refreshTime = 5000; // 5秒刷新一次(从2秒改为5秒)
     
     // 自动刷新按钮切换
     document.getElementById('toggleAutoRefresh').addEventListener('click', function() {
@@ -298,6 +326,13 @@ document.addEventListener('DOMContentLoaded', function() {
             this.classList.remove('btn-success');
             this.classList.add('btn-outline-success');
             stopAutoRefresh();
+        }
+    });
+    
+    // 重置数据包统计按钮点击事件
+    document.getElementById('resetPacketStats').addEventListener('click', function() {
+        if (confirm('确定要清除所有数据包统计记录吗？此操作不可撤销。')) {
+            resetPacketStats();
         }
     });
     
@@ -323,6 +358,80 @@ document.addEventListener('DOMContentLoaded', function() {
             clearInterval(refreshInterval);
             refreshInterval = null;
         }
+    }
+    
+    // 重置数据包统计
+    function resetPacketStats() {
+        // 显示加载状态
+        const button = document.getElementById('resetPacketStats');
+        const originalText = button.innerHTML;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> 处理中...';
+        button.disabled = true;
+        
+        // 发送请求
+        fetch('/dashboard/reset-packet-stats/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCsrfToken(),
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({})
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                // 显示成功消息
+                showMessage('数据包统计已成功清除', 'success');
+                
+                // 立即刷新数据
+                fetchDashboardData();
+            } else {
+                // 显示错误消息
+                showMessage(data.message || '操作失败', 'danger');
+            }
+        })
+        .catch(error => {
+            // 显示错误消息
+            showMessage('操作失败: ' + error, 'danger');
+        })
+        .finally(() => {
+            // 恢复按钮状态
+            button.innerHTML = originalText;
+            button.disabled = false;
+        });
+    }
+    
+    // 获取CSRF令牌
+    function getCsrfToken() {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.startsWith('csrftoken=')) {
+                return cookie.substring('csrftoken='.length, cookie.length);
+            }
+        }
+        return '';
+    }
+    
+    // 显示消息提示
+    function showMessage(message, type) {
+        // 创建消息元素
+        const alertDiv = document.createElement('div');
+        alertDiv.className = `alert alert-${type} alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3`;
+        alertDiv.style.zIndex = '9999';
+        alertDiv.role = 'alert';
+        alertDiv.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        `;
+        
+        // 添加到页面
+        document.body.appendChild(alertDiv);
+        
+        // 5秒后自动消失
+        setTimeout(() => {
+            alertDiv.remove();
+        }, 5000);
     }
     
     // 设置进度条宽度
@@ -366,35 +475,10 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .catch(error => {
                 console.error('更新仪表盘数据失败:', error);
+                showMessage('更新仪表盘数据失败: ' + error, 'danger');
             });
     }
 
-    // 显示错误消息
-    function showErrorMessage(message) {
-        // 如果已存在消息，先移除
-        const existingAlert = document.querySelector('.alert-danger');
-        if (existingAlert) {
-            existingAlert.remove();
-        }
-        
-        // 创建新的错误消息
-        const alertDiv = document.createElement('div');
-        alertDiv.className = 'alert alert-danger alert-dismissible fade show';
-        alertDiv.innerHTML = `
-            ${message}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        `;
-        
-        // 插入到页面顶部
-        const mainContent = document.querySelector('.main-content');
-        mainContent.insertBefore(alertDiv, mainContent.firstChild);
-        
-        // 5秒后自动消失
-        setTimeout(() => {
-            alertDiv.remove();
-        }, 5000);
-    }
-    
     // 更新系统状态
     function updateSystemStatus(status) {
         if (!status) return;
@@ -417,6 +501,10 @@ document.addEventListener('DOMContentLoaded', function() {
             statusText = '未知';
         }
         
+        // 更新 CPU 和内存使用率的显示值
+        const cpuValue = Math.round(status.cpu_usage);
+        const memoryValue = Math.round(status.memory_usage);
+        
         statusHTML = `
             <h5 class="card-title">
                 <span class="badge ${statusClass}">${statusText}</span>
@@ -424,22 +512,31 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="mb-2">
                 <span class="text-muted">CPU使用率:</span>
                 <div class="progress">
-                    <div class="progress-bar" role="progressbar" style="width: ${status.cpu_usage}%" 
-                        aria-valuenow="${status.cpu_usage}" aria-valuemin="0" 
-                        aria-valuemax="100">${status.cpu_usage}%</div>
+                    <div class="progress-bar" role="progressbar" style="width: ${cpuValue}%" 
+                        aria-valuenow="${cpuValue}" aria-valuemin="0" 
+                        aria-valuemax="100">${cpuValue}%</div>
                 </div>
             </div>
             <div>
                 <span class="text-muted">内存使用率:</span>
                 <div class="progress">
-                    <div class="progress-bar bg-info" role="progressbar" style="width: ${status.memory_usage}%" 
-                        aria-valuenow="${status.memory_usage}" aria-valuemin="0" 
-                        aria-valuemax="100">${status.memory_usage}%</div>
+                    <div class="progress-bar bg-info" role="progressbar" style="width: ${memoryValue}%" 
+                        aria-valuenow="${memoryValue}" aria-valuemin="0" 
+                        aria-valuemax="100">${memoryValue}%</div>
                 </div>
             </div>
         `;
         
         document.getElementById('systemStatusCard').innerHTML = statusHTML;
+        
+        // 添加动画效果高亮变化
+        setTimeout(() => {
+            const cpuBar = document.querySelector('#systemStatusCard .progress-bar:first-of-type');
+            const memoryBar = document.querySelector('#systemStatusCard .progress-bar:last-of-type');
+            
+            if (cpuBar) highlightElement(cpuBar);
+            if (memoryBar) highlightElement(memoryBar);
+        }, 100);
     }
     
     // 更新数据包统计
@@ -673,22 +770,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
     }
-});
-
-// 添加CSS动画样式
-document.addEventListener('DOMContentLoaded', function() {
-    const style = document.createElement('style');
-    style.textContent = `
-        .highlight-change {
-            animation: highlight 1s ease;
-        }
-        
-        @keyframes highlight {
-            0% { background-color: rgba(255, 255, 0, 0.5); }
-            100% { background-color: transparent; }
-        }
-    `;
-    document.head.appendChild(style);
 });
 
 // 初始化流量图表

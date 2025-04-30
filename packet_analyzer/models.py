@@ -36,7 +36,7 @@ class PacketLog(models.Model):
         (SUSPICIOUS, '可疑'),
     ]
     
-    timestamp = models.DateTimeField(verbose_name='捕获时间', default=timezone.now)
+    timestamp = models.DateTimeField(verbose_name='捕获时间', default=timezone.now, db_index=True)
     source_ip = models.GenericIPAddressField(verbose_name='源IP地址')
     source_port = models.IntegerField(verbose_name='源端口')
     destination_ip = models.GenericIPAddressField(verbose_name='目标IP地址')

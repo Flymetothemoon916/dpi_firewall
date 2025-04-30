@@ -375,7 +375,7 @@ class FirewallEngine:
             if self.detailed_logging:
                 packet_log = self._create_packet_log(
                     src_ip, dst_ip, src_port, dst_port,
-                    protocol_name, packet, direction, "inspecting"
+                    protocol_name, packet, direction, "suspicious"
                 )
             
             # 执行WAF检测
@@ -684,6 +684,9 @@ class FirewallEngine:
                     inbound_bytes_per_sec = self.stats['inbound_bytes']
                     outbound_bytes_per_sec = self.stats['outbound_bytes']
                 
+                # 获取当前被阻止的数据包数量，确保数值不丢失
+                blocked_packets = self.stats['blocked_packets']
+                
                 # 创建新的统计记录
                 TrafficStatistics.objects.create(
                     timestamp=current_time,
@@ -691,7 +694,7 @@ class FirewallEngine:
                     outbound_packets=self.stats['outbound_packets'],
                     inbound_bytes=self.stats['inbound_bytes'],
                     outbound_bytes=self.stats['outbound_bytes'],
-                    blocked_packets=self.stats['blocked_packets'],
+                    blocked_packets=blocked_packets,
                     inbound_bytes_per_sec=inbound_bytes_per_sec,
                     outbound_bytes_per_sec=outbound_bytes_per_sec
                 )
@@ -699,13 +702,16 @@ class FirewallEngine:
                 # 更新最后统计时间
                 self.last_stats_time = current_time
                 
-                # 重置统计值（使用统一的方式）
+                # 重置统计值（使用统一的方式），但保留blocked_packets累计值
+                temp_blocked = self.stats['blocked_packets']
                 for key in self.stats:
                     if key != 'last_update':
                         self.stats[key] = 0
                 self.stats['last_update'] = datetime.now()
+                # 还原阻止数据包计数
+                self.stats['blocked_packets'] = temp_blocked
                 
-                logger.info("流量统计已保存到数据库")
+                logger.info(f"流量统计已保存到数据库: 入站={self.stats['inbound_packets']}, 出站={self.stats['outbound_packets']}, 阻止={blocked_packets}")
         except Exception as e:
             logger.error(f"保存统计数据失败: {str(e)}")
     
@@ -748,9 +754,16 @@ class FirewallEngine:
                     matched_rule=rule
                 )
                 
-                # 如果是可疑或阻断的数据包，进行深度检测
+                # 对所有数据包进行深度检测，但优先处理可疑和阻止的包
                 if action in ['suspicious', 'blocked']:
-                    self._perform_deep_inspection(packet_log, packet)
+                    dpi_result = self._perform_deep_inspection(packet_log, packet)
+                    if dpi_result is None:  # 如果深度检测失败，确保创建一个基本的DPI结果
+                        self._create_basic_dpi_result(packet_log, action)
+                    elif dpi_result.is_malicious:
+                        logger.info(f"发现恶意流量: {src_ip}:{src_port} -> {dst_ip}:{dst_port}, 风险级别: {dpi_result.risk_level}")
+                else:
+                    # 对正常流量也进行检测，但使用更简单的逻辑
+                    self._check_normal_packet(packet_log, packet)
                 
                 # 如果规则动作是告警，创建告警日志
                 if action == 'alert':
@@ -760,9 +773,76 @@ class FirewallEngine:
                 if action == 'blocked':
                     with self.lock:
                         self.stats['blocked_packets'] += 1
-                    
+                
         except Exception as e:
-            logger.error(f"记录数据包日志失败: {str(e)}")
+            logger.error(f"记录数据包日志时出错: {str(e)}")
+            # 尝试在事务外部记录，确保数据不丢失
+            try:
+                # 在事务外创建协议对象
+                protocol_obj, _ = Protocol.objects.get_or_create(
+                    name=protocol,
+                    defaults={'description': f'{protocol}协议'}
+                )
+                
+                # 创建数据包日志
+                packet_log = PacketLog.objects.create(
+                    timestamp=timezone.now(),
+                    source_ip=src_ip,
+                    source_port=src_port,
+                    destination_ip=dst_ip,
+                    destination_port=dst_port,
+                    protocol=protocol_obj,
+                    payload=str(packet)[:1000],  # 限制大小
+                    packet_size=len(packet),
+                    direction=direction,
+                    status=action,
+                    matched_rule=rule
+                )
+                
+                # 确保至少创建一个基本的DPI结果
+                if action in ['suspicious', 'blocked']:
+                    self._create_basic_dpi_result(packet_log, action)
+                
+            except Exception as recovery_error:
+                logger.critical(f"恢复记录数据包日志失败: {str(recovery_error)}")
+    
+    def _check_normal_packet(self, packet_log: PacketLog, packet):
+        """对正常流量进行简单检查，检测是否有可疑模式"""
+        try:
+            # 简单的检查，只针对HTTP和HTTPS流量
+            if packet_log.protocol and packet_log.protocol.name in ['HTTP', 'HTTPS']:
+                payload = str(packet)
+                
+                # 简化的检测模式列表
+                simple_patterns = [
+                    (r'password=', '可能的密码传输'),
+                    (r'admin', '管理员相关流量'),
+                    (r'login', '登录相关流量')
+                ]
+                
+                for pattern, desc in simple_patterns:
+                    if re.search(pattern, payload, re.IGNORECASE):
+                        # 只记录检测结果，不进行警告
+                        metadata = {
+                            'source_ip': packet_log.source_ip,
+                            'destination_ip': packet_log.destination_ip, 
+                            'description': '正常流量简单检测',
+                            'timestamp': timezone.now().isoformat()
+                        }
+                        
+                        DeepInspectionResult.objects.create(
+                            packet=packet_log,
+                            application_protocol=packet_log.protocol.name,
+                            content_type='',
+                            detected_patterns=desc,
+                            risk_level='low',
+                            is_malicious=False,
+                            metadata=metadata
+                        )
+                        
+                        break  # 只创建一个检测结果
+        except Exception as e:
+            logger.debug(f"检查正常数据包时出错: {str(e)}")
     
     def _perform_deep_inspection(self, packet_log: PacketLog, packet):
         """
@@ -782,7 +862,7 @@ class FirewallEngine:
             metadata = {}
             
             # 根据端口识别应用层协议
-            if packet.haslayer(TCP):
+            if hasattr(packet, 'haslayer') and packet.haslayer(TCP):
                 dst_port = packet[TCP].dport
                 if dst_port == 80:
                     app_protocol = "HTTP"
@@ -794,74 +874,70 @@ class FirewallEngine:
                     app_protocol = "SSH"
                 elif dst_port == 25:
                     app_protocol = "SMTP"
-                
-                # 尝试提取更多HTTP信息
-                if app_protocol in ["HTTP", "HTTPS"] and packet.haslayer(scapy.Raw):
-                    try:
-                        raw_data = packet[scapy.Raw].load.decode('utf-8', errors='ignore')
-                        
-                        # 提取HTTP头信息
-                        if "Content-Type:" in raw_data:
-                            content_type = re.search(r"Content-Type:\s*([^\r\n]+)", raw_data).group(1)
-                        
-                        # 检查是否包含常见攻击模式
-                        attack_patterns = {
-                            "SQL注入": [r"SELECT.*FROM", r"INSERT.*INTO", r"UPDATE.*SET", r"DELETE.*FROM", r"DROP.*TABLE"],
-                            "XSS": [r"<script>", r"javascript:", r"alert\(", r"onload=", r"onerror="],
-                            "命令注入": [r"system\(", r"exec\(", r"shell_exec", r"passthru", r";ls", r";cat", r"|grep"]
-                        }
-                        
-                        found_patterns = []
-                        for attack_type, patterns in attack_patterns.items():
-                            for pattern in patterns:
-                                if re.search(pattern, raw_data, re.IGNORECASE):
-                                    found_patterns.append(f"{attack_type}:{pattern}")
-                                    is_malicious = True
-                                    risk_level = "high"
-                        
-                        if found_patterns:
-                            detected_patterns = "; ".join(found_patterns[:5])  # 最多记录5个模式
-                            metadata["attack_details"] = found_patterns
-                        
-                        # 提取HTTP方法、URL和用户代理
-                        if "GET " in raw_data or "POST " in raw_data or "HTTP/" in raw_data:
-                            method_match = re.search(r"^(GET|POST|PUT|DELETE|HEAD|OPTIONS)\s+([^\s]+)", raw_data)
-                            if method_match:
-                                metadata["http_method"] = method_match.group(1)
-                                metadata["http_url"] = method_match.group(2)
-                            
-                            user_agent_match = re.search(r"User-Agent:\s*([^\r\n]+)", raw_data)
-                            if user_agent_match:
-                                metadata["user_agent"] = user_agent_match.group(1)
-                    except:
-                        pass
-                
-            elif packet.haslayer(UDP):
-                dst_port = packet[UDP].dport
-                if dst_port == 53:
+            else:
+                # 使用数据包日志中的信息
+                dst_port = packet_log.destination_port
+                if dst_port == 80:
+                    app_protocol = "HTTP"
+                elif dst_port == 443:
+                    app_protocol = "HTTPS"
+                elif dst_port == 21:
+                    app_protocol = "FTP"
+                elif dst_port == 22:
+                    app_protocol = "SSH"
+                elif dst_port == 25:
+                    app_protocol = "SMTP"
+                elif dst_port == 53:
                     app_protocol = "DNS"
-                    
-                    # 尝试提取DNS查询信息
-                    if packet.haslayer(scapy.DNS):
-                        try:
-                            dns = packet[scapy.DNS]
-                            if dns.qr == 0:  # 0表示查询
-                                metadata["dns_query"] = dns.qd.qname.decode() if hasattr(dns, 'qd') and dns.qd else ""
-                                metadata["dns_type"] = dns.qd.qtype if hasattr(dns, 'qd') and dns.qd else 0
-                        except:
-                            pass
+                elif packet_log.protocol:
+                    app_protocol = packet_log.protocol.name
+            
+            # 提取和检查数据包内容
+            payload = str(packet)
+            
+            # 检测各种恶意模式
+            malicious_patterns = [
+                (r'(?i)(?:union\s+all|union\s+select|insert\s+into|select\s+from)', 'SQL注入尝试'),
+                (r'(?i)(?:<script>|alert\(|document\.cookie|eval\(|javascript:)', 'XSS尝试'),
+                (r'(?i)(?:\.\.\/|\.\.\\|\/etc\/passwd|\/bin\/bash|cmd\.exe)', '路径遍历尝试'),
+                (r'(?i)(?:password=|passwd=|pwd=|user=|username=|login=)', '潜在的密码泄露'),
+                (r'(?i)(?:exec\(|system\(|shell_exec\(|passthru\(|eval\()', '命令注入尝试')
+            ]
             
             # 检测风险级别
             if packet_log.status == 'blocked':
                 if not is_malicious:  # 如果之前没有设置为恶意
                     risk_level = "high"
                     is_malicious = True
+                    detected_patterns = detected_patterns or "自动阻止的流量"
             elif packet_log.status == 'suspicious':
                 if risk_level == 'low':  # 如果之前没有设置为高风险
                     risk_level = "medium"
+                    detected_patterns = detected_patterns or "可疑流量模式"
+                
+            # 添加更多元数据信息
+            metadata.update({
+                'source_ip': packet_log.source_ip,
+                'destination_ip': packet_log.destination_ip,
+                'source_port': packet_log.source_port,
+                'destination_port': packet_log.destination_port,
+                'direction': packet_log.direction,
+                'status': packet_log.status,
+                'timestamp': timezone.now().isoformat()
+            })
+            
+            # 对恶意模式进行检查
+            for pattern, desc in malicious_patterns:
+                if re.search(pattern, payload, re.IGNORECASE):
+                    detected_patterns = detected_patterns + ("; " if detected_patterns else "") + desc
+                    is_malicious = True
+                    risk_level = "high"
+                    metadata['detected_malicious_pattern'] = desc
+                    metadata['detection_timestamp'] = timezone.now().isoformat()
+                    break
             
             # 创建深度检测结果
-            DeepInspectionResult.objects.create(
+            dpi_result = DeepInspectionResult.objects.create(
                 packet=packet_log,
                 application_protocol=app_protocol,
                 content_type=content_type,
@@ -871,8 +947,13 @@ class FirewallEngine:
                 metadata=metadata
             )
             
+            logger.info(f"已创建DPI分析结果: ID={dpi_result.id}, 协议={app_protocol}, 风险={risk_level}")
+            return dpi_result
+            
         except Exception as e:
             logger.error(f"执行深度包检测失败: {str(e)}")
+            # 即使在这里失败，也不返回None，而是让调用者处理
+            return None
     
     def _create_alert(self, rule: Rule, src_ip: str, packet):
         """
@@ -1080,7 +1161,7 @@ class FirewallEngine:
     
     def _create_packet_log(self, src_ip: str, dst_ip: str, src_port: int, dst_port: int,
                           protocol_name: str, packet, direction: str, status: str) -> PacketLog:
-        """创建数据包日志记录"""
+        """创建数据包日志"""
         try:
             # 获取或创建协议对象
             protocol_obj = self.protocol_cache.get(protocol_name.lower())
@@ -1137,4 +1218,69 @@ class FirewallEngine:
             )
             
         except Exception as e:
-            logger.error(f"创建WAF告警失败: {str(e)}") 
+            logger.error(f"创建WAF告警失败: {str(e)}")
+    
+    def _create_basic_dpi_result(self, packet_log: PacketLog, status: str):
+        """为数据包创建基本的DPI结果，当正常的深度检测失败时使用"""
+        try:
+            # 设置默认值
+            app_protocol = "UNKNOWN"
+            risk_level = "low"
+            is_malicious = False
+            detected_patterns = "自动生成的DPI结果"
+            
+            # 根据端口识别应用层协议
+            dst_port = packet_log.destination_port
+            if dst_port == 80:
+                app_protocol = "HTTP"
+            elif dst_port == 443:
+                app_protocol = "HTTPS"
+            elif dst_port in [20, 21]:
+                app_protocol = "FTP"
+            elif dst_port == 22:
+                app_protocol = "SSH"
+            elif dst_port == 25:
+                app_protocol = "SMTP"
+            elif dst_port == 53:
+                app_protocol = "DNS"
+            elif packet_log.protocol:
+                app_protocol = packet_log.protocol.name
+            
+            # 根据状态设置风险级别
+            if status == 'blocked':
+                risk_level = "high"
+                is_malicious = True
+                detected_patterns = "自动阻止的流量"
+            elif status == 'suspicious':
+                risk_level = "medium"
+                detected_patterns = "可疑流量模式"
+            
+            # 基本元数据
+            metadata = {
+                'source_ip': packet_log.source_ip,
+                'destination_ip': packet_log.destination_ip,
+                'source_port': packet_log.source_port,
+                'destination_port': packet_log.destination_port,
+                'direction': packet_log.direction,
+                'status': packet_log.status,
+                'generated_by': 'basic_dpi_fallback',
+                'timestamp': timezone.now().isoformat()
+            }
+            
+            # 创建DPI结果
+            dpi_result = DeepInspectionResult.objects.create(
+                packet=packet_log,
+                application_protocol=app_protocol,
+                content_type="",
+                detected_patterns=detected_patterns,
+                risk_level=risk_level,
+                is_malicious=is_malicious,
+                metadata=metadata
+            )
+            
+            logger.info(f"已创建基本DPI分析结果: ID={dpi_result.id}, 协议={app_protocol}, 风险={risk_level}")
+            return dpi_result
+            
+        except Exception as e:
+            logger.error(f"创建基本DPI结果失败: {str(e)}")
+            return None 

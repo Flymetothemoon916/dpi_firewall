@@ -9,4 +9,5 @@ urlpatterns = [
     path('get-dashboard-data/', views.get_dashboard_data, name='get_dashboard_data'),
     path('performance/', views.performance_monitor, name='performance_monitor'),
     path('get-performance-data/', views.get_performance_data, name='get_performance_data'),
+    path('reset-packet-stats/', views.reset_packet_stats, name='reset_packet_stats'),
 ] 
