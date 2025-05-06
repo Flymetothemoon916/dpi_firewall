@@ -78,20 +78,69 @@ def dashboard(request):
 @login_required
 def alerts(request):
     """显示告警页面"""
-    alerts_list = AlertLog.objects.order_by('-timestamp')
-    return render(request, 'dashboard/alerts.html', {'alerts': alerts_list})
+    # 获取过滤参数
+    level = request.GET.get('level')
+    is_read = request.GET.get('is_read')
+    source_ip = request.GET.get('source_ip')
+    
+    # 基础查询集
+    alerts_query = AlertLog.objects.order_by('-timestamp')
+    
+    # 应用过滤
+    if level and level != 'all':
+        alerts_query = alerts_query.filter(level=level)
+    
+    if is_read == 'true':
+        alerts_query = alerts_query.filter(is_read=True)
+    elif is_read == 'false':
+        alerts_query = alerts_query.filter(is_read=False)
+        
+    if source_ip:
+        alerts_query = alerts_query.filter(source_ip=source_ip)
+    
+    # 如果是AJAX请求，返回JSON数据（用于实时刷新）
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        alerts_data = []
+        for alert in alerts_query[:100]:  # 限制最大返回数量
+            alerts_data.append({
+                'id': alert.id,
+                'timestamp': alert.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+                'level': alert.level,
+                'title': alert.title,
+                'description': alert.description[:100] + '...' if len(alert.description) > 100 else alert.description,
+                'source_ip': alert.source_ip,
+                'is_read': alert.is_read
+            })
+        return JsonResponse({'alerts': alerts_data})
+    
+    return render(request, 'dashboard/alerts.html', {'alerts': alerts_query})
 
 
 @login_required
 def mark_alert_as_read(request, alert_id):
     """将告警标记为已读"""
-    try:
-        alert = AlertLog.objects.get(id=alert_id)
-        alert.is_read = True
-        alert.save()
-        return JsonResponse({'status': 'success'})
-    except AlertLog.DoesNotExist:
-        return JsonResponse({'status': 'error', 'message': '告警不存在'}, status=404)
+    if request.method == 'POST':
+        try:
+            if alert_id == 0:  # 标记所有告警为已读
+                AlertLog.objects.filter(is_read=False).update(is_read=True)
+                return JsonResponse({'success': True, 'message': '所有告警已标记为已读'})
+            else:
+                alert = AlertLog.objects.get(id=alert_id)
+                alert.is_read = True
+                alert.save()
+                return JsonResponse({'success': True})
+        except AlertLog.DoesNotExist:
+            return JsonResponse({'success': False, 'message': '告警不存在'}, status=404)
+    return JsonResponse({'success': False, 'message': '请求方法不支持'}, status=405)
+
+
+@login_required
+def clear_read_alerts(request):
+    """清除所有已读告警"""
+    if request.method == 'POST':
+        deleted_count = AlertLog.objects.filter(is_read=True).delete()[0]
+        return JsonResponse({'success': True, 'deleted_count': deleted_count})
+    return JsonResponse({'success': False, 'message': '请求方法不支持'}, status=405)
 
 
 @login_required

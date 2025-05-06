@@ -124,7 +124,6 @@ class Command(BaseCommand):
             except Exception as e:
                 logger.error(f"处理数据包时出错: {str(e)}")
                 action = "blocked"  # 出错时默认阻止
-                matched_rule = None
                 
             return action
 

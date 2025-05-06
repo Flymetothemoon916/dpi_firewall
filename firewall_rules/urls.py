@@ -7,6 +7,7 @@ urlpatterns = [
     path('create/', views.rule_create, name='rule_create'),
     path('<int:rule_id>/edit/', views.rule_edit, name='rule_edit'),
     path('<int:rule_id>/toggle/', views.rule_toggle, name='rule_toggle'),
+    path('<int:rule_id>/packets/', views.rule_matched_packets, name='rule_matched_packets'),
     path('blacklist/', views.blacklist, name='blacklist'),
     path('blacklist/<int:ip_id>/delete/', views.blacklist_delete, name='blacklist_delete'),
     path('whitelist/', views.whitelist, name='whitelist'),

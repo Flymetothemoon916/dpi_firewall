@@ -177,3 +177,24 @@ def whitelist_delete(request, ip_id):
     else:
         messages.success(request, f'IP {address} 已从白名单移除')
         return redirect('whitelist')
+
+
+@login_required
+def rule_matched_packets(request, rule_id):
+    """显示规则匹配的数据包列表"""
+    rule = get_object_or_404(Rule, id=rule_id)
+    
+    # 获取匹配的数据包
+    packets = rule.matched_packets.all().order_by('-timestamp')
+    
+    # 分页
+    paginator = Paginator(packets, 20)  # 每页显示20条
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    context = {
+        'rule': rule,
+        'page_obj': page_obj,
+    }
+    
+    return render(request, 'firewall_rules/rule_matched_packets.html', context)

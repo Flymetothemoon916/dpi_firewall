@@ -5,6 +5,7 @@ urlpatterns = [
     path('', views.dashboard, name='dashboard'),
     path('alerts/', views.alerts, name='alerts'),
     path('alerts/mark-as-read/<int:alert_id>/', views.mark_alert_as_read, name='mark_alert_as_read'),
+    path('alerts/clear-read/', views.clear_read_alerts, name='clear_read_alerts'),
     path('traffic-stats/', views.traffic_stats, name='traffic_stats'),
     path('get-dashboard-data/', views.get_dashboard_data, name='get_dashboard_data'),
     path('performance/', views.performance_monitor, name='performance_monitor'),

@@ -160,7 +160,7 @@
                 <div class="card-body">
                     <p class="fw-bold">命中此规则的数据包:</p>
                     {% if rule.matched_packets.exists %}
-                    <a href="/packets/?rule={{ rule.id }}" class="btn btn-outline-primary">
+                    <a href="{% url 'rule_matched_packets' rule.id %}" class="btn btn-outline-primary">
                         查看 {{ rule.matched_packets.count }} 条匹配记录
                     </a>
                     {% else %}

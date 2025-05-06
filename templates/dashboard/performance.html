@@ -125,7 +125,7 @@
                     <canvas id="packetPerformanceChart" height="200"></canvas>
                 </div>
                 <div class="row text-center">
-                    <div class="col-md-4">
+                    <div class="col-md-6">
                         <div class="card bg-light">
                             <div class="card-body py-2">
                                 <h6 class="mb-0">平均处理时间</h6>
@@ -133,19 +133,11 @@
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-md-6">
                         <div class="card bg-light">
                             <div class="card-body py-2">
                                 <h6 class="mb-0">每秒处理包</h6>
                                 <h3 id="pps" class="mb-0">0 pps</h3>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="card bg-light">
-                            <div class="card-body py-2">
-                                <h6 class="mb-0">DPI扫描效率</h6>
-                                <h3 id="dpiEfficiency" class="mb-0">0%</h3>
                             </div>
                         </div>
                     </div>
@@ -348,19 +340,17 @@
         packetPerformanceChart = new Chart(ctx, {
             type: 'bar',
             data: {
-                labels: ['处理时间', '吞吐量', 'DPI效率'],
+                labels: ['处理时间', '吞吐量'],
                 datasets: [{
                     label: '当前值',
-                    data: [0, 0, 0],
+                    data: [0, 0],
                     backgroundColor: [
                         'rgba(255, 99, 132, 0.5)',
-                        'rgba(54, 162, 235, 0.5)',
-                        'rgba(255, 206, 86, 0.5)'
+                        'rgba(54, 162, 235, 0.5)'
                     ],
                     borderColor: [
                         'rgba(255, 99, 132, 1)',
-                        'rgba(54, 162, 235, 1)',
-                        'rgba(255, 206, 86, 1)'
+                        'rgba(54, 162, 235, 1)'
                     ],
                     borderWidth: 1
                 }]
@@ -453,11 +443,9 @@
         // 更新数据包处理性能
         const processingTime = data.packet_stats ? data.packet_stats.avg_processing_time || 0 : 0;
         const pps = data.packet_stats ? data.packet_stats.packets_per_second || 0 : 0;
-        const dpiEfficiency = data.dpi_stats ? data.dpi_stats.efficiency || 0 : 0;
         
         $('#avgProcessingTime').text(`${processingTime.toFixed(2)} ms`);
         $('#pps').text(`${pps.toFixed(0)} pps`);
-        $('#dpiEfficiency').text(`${dpiEfficiency.toFixed(1)}%`);
         
         // 更新防火墙规则性能
         const totalRules = data.rules_stats ? data.rules_stats.total || 0 : 0;
@@ -501,9 +489,8 @@
         // 更新数据包性能图表
         const processingTime = data.packet_stats ? data.packet_stats.avg_processing_time || 0 : 0;
         const pps = data.packet_stats ? data.packet_stats.packets_per_second / 100 || 0 : 0; // 缩放
-        const dpiEfficiency = data.dpi_stats ? data.dpi_stats.efficiency || 0 : 0;
         
-        packetPerformanceChart.data.datasets[0].data = [processingTime, pps, dpiEfficiency];
+        packetPerformanceChart.data.datasets[0].data = [processingTime, pps];
         packetPerformanceChart.update();
         
         // 更新规则性能图表

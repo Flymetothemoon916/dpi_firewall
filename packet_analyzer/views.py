@@ -65,9 +65,52 @@ def packet_detail(request, packet_id):
     except DeepInspectionResult.DoesNotExist:
         dpi_result = None
     
+    # 预处理数据包载荷内容
+    packet_payload = {
+        'info': '',
+        'raw': '',
+        'hex': '',
+        'structure': ''
+    }
+    
+    if packet.payload:
+        payload = packet.payload
+        
+        # 提取基本信息部分
+        if "=== PACKET INFO ===" in payload:
+            raw_index = payload.find("=== RAW PAYLOAD ===")
+            if raw_index > 0:
+                packet_payload['info'] = payload[:raw_index]
+            else:
+                packet_payload['info'] = payload
+        
+        # 提取原始载荷部分
+        if "=== RAW PAYLOAD ===" in payload:
+            raw_start = payload.find("=== RAW PAYLOAD ===")
+            hex_start = payload.find("=== HEXDUMP ===")
+            if hex_start > raw_start:
+                packet_payload['raw'] = payload[raw_start:hex_start]
+            else:
+                packet_payload['raw'] = payload[raw_start:]
+        
+        # 提取十六进制部分
+        if "=== HEXDUMP ===" in payload:
+            hex_start = payload.find("=== HEXDUMP ===")
+            structure_start = payload.find("=== PACKET STRUCTURE ===")
+            if structure_start > hex_start:
+                packet_payload['hex'] = payload[hex_start:structure_start]
+            else:
+                packet_payload['hex'] = payload[hex_start:]
+        
+        # 提取数据包结构部分
+        if "=== PACKET STRUCTURE ===" in payload:
+            structure_start = payload.find("=== PACKET STRUCTURE ===")
+            packet_payload['structure'] = payload[structure_start:]
+    
     context = {
         'packet': packet,
-        'dpi_result': dpi_result
+        'dpi_result': dpi_result,
+        'packet_payload': packet_payload
     }
     
     return render(request, 'packet_analyzer/packet_detail.html', context)

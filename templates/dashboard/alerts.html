@@ -3,60 +3,364 @@
 
 {% block title %}告警日志{% endblock %}
 
+{% block page_title %}告警日志{% endblock %}
+
+{% block page_actions %}
+<div class="btn-group me-2">
+    <button type="button" class="btn btn-sm btn-outline-secondary" id="markAllRead">
+        <i class="fas fa-check-double me-1"></i>全部标为已读
+    </button>
+    <button type="button" class="btn btn-sm btn-outline-danger" id="clearAllAlerts">
+        <i class="fas fa-trash me-1"></i>清空已读告警
+    </button>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .alert-description {
+        max-width: 350px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .alert-modal-description {
+        white-space: pre-line;
+        max-height: 400px;
+        overflow-y: auto;
+    }
+    .alert-row {
+        cursor: pointer;
+    }
+    .alert-row:hover {
+        background-color: rgba(0, 0, 0, 0.05) !important;
+    }
+    .badge-critical {
+        background-color: #dc3545;
+    }
+    .badge-warning {
+        background-color: #ffc107; 
+        color: #212529;
+    }
+    .badge-info {
+        background-color: #0dcaf0;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="container-fluid">
-    <div class="card">
-        <div class="card-header">
-            <i class="fas fa-bell"></i> 告警列表
+<div class="card shadow-sm">
+    <div class="card-header bg-light d-flex justify-content-between align-items-center">
+        <div>
+            <i class="fas fa-bell text-warning me-2"></i> 告警列表
         </div>
-        <div class="card-body">
-            {% if alerts %}
-                <div class="table-responsive">
-                    <table class="table table-hover table-striped">
-                        <thead>
-                            <tr>
-                                <th>时间</th>
-                                <th>级别</th>
-                                <th>标题</th>
-                                <th>描述</th>
-                                <th>源IP</th>
-                                <th>状态</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for alert in alerts %}
-                            <tr>
-                                <td>{{ alert.timestamp|date:"Y-m-d H:i:s" }}</td>
-                                <td>
-                                    {% if alert.level == 'critical' %}
-                                    <span class="badge bg-danger">严重</span>
-                                    {% elif alert.level == 'warning' %}
-                                    <span class="badge bg-warning text-dark">警告</span>
-                                    {% else %}
-                                    <span class="badge bg-info">信息</span>
-                                    {% endif %}
-                                </td>
-                                <td>{{ alert.title }}</td>
-                                <td>{{ alert.description }}</td>
-                                <td>{{ alert.source_ip|default:"-" }}</td>
-                                <td>
-                                    {% if alert.is_read %}
-                                    <span class="badge bg-secondary">已读</span>
-                                    {% else %}
-                                    <span class="badge bg-success">未读</span>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+        <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="autoRefresh">
+            <label class="form-check-label" for="autoRefresh">自动刷新</label>
+        </div>
+    </div>
+    <div class="card-body p-0">
+        {% if alerts %}
+            <div class="table-responsive">
+                <table class="table table-hover border-bottom mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 160px">时间</th>
+                            <th style="width: 80px">级别</th>
+                            <th style="width: 25%">标题</th>
+                            <th>描述</th>
+                            <th style="width: 120px">源IP</th>
+                            <th style="width: 80px">状态</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for alert in alerts %}
+                        <tr class="alert-row" data-id="{{ alert.id }}">
+                            <td>{{ alert.timestamp|date:"Y-m-d H:i:s" }}</td>
+                            <td>
+                                {% if alert.level == 'critical' %}
+                                <span class="badge badge-critical">严重</span>
+                                {% elif alert.level == 'warning' %}
+                                <span class="badge badge-warning">警告</span>
+                                {% else %}
+                                <span class="badge badge-info">信息</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ alert.title }}</td>
+                            <td>
+                                <div class="alert-description">{{ alert.description }}</div>
+                            </td>
+                            <td>{% if alert.source_ip %}<a href="#" class="ip-info" data-ip="{{ alert.source_ip }}">{{ alert.source_ip }}</a>{% else %}-{% endif %}</td>
+                            <td>
+                                {% if alert.is_read %}
+                                <span class="badge bg-secondary">已读</span>
+                                {% else %}
+                                <span class="badge bg-success">未读</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="alert alert-info m-3">
+                <i class="fas fa-info-circle me-2"></i>没有告警记录
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- 告警详情模态框 -->
+<div class="modal fade" id="alertDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">告警详情</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <span class="fw-bold">时间：</span>
+                    <span id="alert-time"></span>
                 </div>
-            {% else %}
-                <div class="alert alert-info">
-                    没有告警记录
+                <div class="mb-3">
+                    <span class="fw-bold">级别：</span>
+                    <span id="alert-level"></span>
                 </div>
-            {% endif %}
+                <div class="mb-3">
+                    <span class="fw-bold">标题：</span>
+                    <span id="alert-title"></span>
+                </div>
+                <div class="mb-3">
+                    <span class="fw-bold">源IP：</span>
+                    <span id="alert-source-ip"></span>
+                </div>
+                <div class="mb-3">
+                    <span class="fw-bold">描述：</span>
+                    <div id="alert-description" class="alert-modal-description mt-2 p-3 border rounded bg-light"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" id="markAsRead">标记为已读</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+            </div>
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    $(document).ready(function() {
+        // 设置CSRF令牌到所有AJAX请求中
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+        
+        const csrftoken = getCookie('csrftoken');
+        
+        $.ajaxSetup({
+            beforeSend: function(xhr, settings) {
+                if (!/^(GET|HEAD|OPTIONS|TRACE)$/i.test(settings.type) && !this.crossDomain) {
+                    xhr.setRequestHeader("X-CSRFToken", csrftoken);
+                }
+            }
+        });
+        
+        // 告警行点击显示详情
+        $('.alert-row').on('click', function() {
+            const alertId = $(this).data('id');
+            const level = $(this).find('td:eq(1) .badge').text();
+            const time = $(this).find('td:eq(0)').text();
+            const title = $(this).find('td:eq(2)').text();
+            const description = $(this).find('.alert-description').text();
+            const sourceIp = $(this).find('td:eq(4) a').text() || $(this).find('td:eq(4)').text();
+            
+            $('#alert-time').text(time);
+            $('#alert-level').html(`<span class="badge badge-${level === '严重' ? 'critical' : (level === '警告' ? 'warning' : 'info')}">${level}</span>`);
+            $('#alert-title').text(title);
+            $('#alert-source-ip').text(sourceIp);
+            $('#alert-description').text(description);
+            
+            $('#markAsRead').data('id', alertId);
+            
+            $('#alertDetailModal').modal('show');
+        });
+        
+        // 标记为已读
+        $('#markAsRead').on('click', function() {
+            const alertId = $(this).data('id');
+            $.ajax({
+                url: '{% url "mark_alert_as_read" 0 %}'.replace('0', alertId),
+                type: 'POST',
+                success: function(data) {
+                    if(data.success) {
+                        // 更新UI
+                        $(`.alert-row[data-id="${alertId}"] td:last-child .badge`)
+                            .removeClass('bg-success')
+                            .addClass('bg-secondary')
+                            .text('已读');
+                        
+                        $('#alertDetailModal').modal('hide');
+                        
+                        // 显示成功消息
+                        showToast('告警已标记为已读', 'success');
+                    } else {
+                        showToast('操作失败: ' + (data.message || '未知错误'), 'danger');
+                    }
+                },
+                error: function(xhr, status, error) {
+                    showToast('操作失败: ' + error, 'danger');
+                    console.error('AJAX错误', xhr.responseText);
+                }
+            });
+        });
+        
+        // 标记全部为已读
+        $('#markAllRead').on('click', function() {
+            if (confirm('确定要将所有告警标记为已读吗？')) {
+                $.ajax({
+                    url: '{% url "mark_alert_as_read" 0 %}',
+                    type: 'POST',
+                    success: function(data) {
+                        if(data.success) {
+                            $('td .badge.bg-success').removeClass('bg-success').addClass('bg-secondary').text('已读');
+                            showToast('所有告警已标记为已读', 'success');
+                        } else {
+                            showToast('操作失败: ' + (data.message || '未知错误'), 'danger');
+                            console.error('操作失败', data);
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        console.error('AJAX错误', xhr.responseText);
+                        showToast('操作失败: ' + error, 'danger');
+                    }
+                });
+            }
+        });
+        
+        // 清空已读告警
+        $('#clearAllAlerts').on('click', function() {
+            if (confirm('确定要清空所有已读告警吗？此操作不可恢复！')) {
+                $.ajax({
+                    url: '{% url "clear_read_alerts" %}',
+                    type: 'POST',
+                    success: function(data) {
+                        if(data.success) {
+                            // 移除已读告警行
+                            $('td .badge.bg-secondary').closest('tr').fadeOut(300, function() {
+                                $(this).remove();
+                                
+                                // 如果没有告警了，显示"没有告警记录"
+                                if ($('.alert-row').length === 0) {
+                                    $('.table-responsive').replaceWith(
+                                        `<div class="alert alert-info m-3">
+                                            <i class="fas fa-info-circle me-2"></i>没有告警记录
+                                        </div>`
+                                    );
+                                }
+                            });
+                            
+                            showToast(`已删除 ${data.deleted_count} 条已读告警`, 'success');
+                        } else {
+                            showToast('操作失败: ' + (data.message || '未知错误'), 'danger');
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        console.error('AJAX错误', xhr.responseText);
+                        showToast('操作失败: ' + error, 'danger');
+                    }
+                });
+            }
+        });
+        
+        // 源IP点击处理
+        $('.ip-info').on('click', function(e) {
+            e.stopPropagation(); // 阻止事件冒泡，避免触发行点击事件
+            const ip = $(this).data('ip');
+            // 这里可以添加IP信息查询功能，例如显示地理位置、威胁情报等
+            // alert(`IP信息: ${ip}`);
+        });
+        
+        // 自动刷新
+        let autoRefreshInterval;
+        $('#autoRefresh').change(function() {
+            if(this.checked) {
+                showToast('自动刷新已启用，每30秒刷新一次', 'info');
+                autoRefreshInterval = setInterval(refreshAlerts, 30000); // 30秒刷新一次
+            } else {
+                clearInterval(autoRefreshInterval);
+                showToast('自动刷新已禁用', 'info');
+            }
+        });
+        
+        // 刷新告警列表函数
+        function refreshAlerts() {
+            $.ajax({
+                url: window.location.href,
+                method: 'GET',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                success: function(data) {
+                    if (data.alerts && data.alerts.length > 0) {
+                        updateAlertsList(data.alerts);
+                    }
+                }
+            });
+        }
+        
+        // 更新告警列表
+        function updateAlertsList(alerts) {
+            // 此处实现告警列表更新逻辑
+            // 为简化起见，目前只执行完整页面刷新
+            location.reload();
+        }
+        
+        // 显示提示消息
+        function showToast(message, type = 'info') {
+            const toast = $(`
+                <div class="toast align-items-center text-white bg-${type} border-0" role="alert" aria-live="assertive" aria-atomic="true">
+                    <div class="d-flex">
+                        <div class="toast-body">
+                            ${message}
+                        </div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                    </div>
+                </div>
+            `);
+            
+            // 添加toast容器（如果不存在）
+            if (!$('#toastContainer').length) {
+                $('body').append('<div id="toastContainer" class="toast-container position-fixed bottom-0 end-0 p-3"></div>');
+            }
+            
+            // 添加toast到容器
+            $('#toastContainer').append(toast);
+            
+            // 显示toast
+            const bsToast = new bootstrap.Toast(toast[0], {
+                delay: 3000
+            });
+            bsToast.show();
+            
+            // 在隐藏后移除DOM
+            toast.on('hidden.bs.toast', function() {
+                $(this).remove();
+            });
+        }
+    });
+</script>
 {% endblock %}

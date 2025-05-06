@@ -81,8 +81,22 @@ class FirewallModule:
         for rule in active_rules:
             rule_patterns = list(rule.pattern.all())
             compiled_patterns = []
+        
+        # 补充SQL注入检测规则
+        sql_injection_patterns = [
+            r'(?i)\binformation_schema\b',
+            r'(?i)/\*.*?\*/',
+            r'(?i)--\s+',
+            r'(?i);\s*DROP\s+TABLE',
+            r'(?i)UNION\s+ALL\s+SELECT',
+            r'(?i)EXEC\s*\('
+        ]
+        
+        # 预编译新增的正则表达式
+        for p in sql_injection_patterns:
+            compiled_patterns.append(re.compile(p))
             
-            for pattern in rule_patterns:
+        for pattern in rule_patterns:
                 if pattern.is_regex:
                     try:
                         compiled_patterns.append(re.compile(pattern.pattern_string))
@@ -418,4 +432,4 @@ class FirewallModule:
             
             logger.info(f"已创建告警 - 规则: {rule.name}, IP: {src_ip}")
         except Exception as e:
-            logger.error(f"创建告警失败: {str(e)}") 
+            logger.error(f"创建告警失败: {str(e)}")

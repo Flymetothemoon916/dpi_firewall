@@ -1,18 +1,19 @@
 from django.contrib import admin
 from .models import SystemStatus, TrafficStatistics, AlertLog
 
-@admin.register(SystemStatus)
-class SystemStatusAdmin(admin.ModelAdmin):
-    list_display = ('status', 'cpu_usage', 'memory_usage', 'started_at', 'updated_at')
-    list_filter = ('status',)
-    readonly_fields = ('updated_at',)
-    search_fields = ('status',)
+# 注释掉SystemStatus模型的注册
+# @admin.register(SystemStatus)
+# class SystemStatusAdmin(admin.ModelAdmin):
+#     list_display = ('status', 'cpu_usage', 'memory_usage', 'started_at', 'updated_at')
+#     list_filter = ('status',)
+#     readonly_fields = ('updated_at',)
+#     search_fields = ('status',)
     
-    def has_add_permission(self, request):
-        # 限制只能有一个系统状态实例
-        if self.model.objects.count() >= 1:
-            return False
-        return super().has_add_permission(request)
+#     def has_add_permission(self, request):
+#         # 限制只能有一个系统状态实例
+#         if self.model.objects.count() >= 1:
+#             return False
+#         return super().has_add_permission(request)
 
 
 @admin.register(TrafficStatistics)

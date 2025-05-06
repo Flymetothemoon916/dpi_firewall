@@ -44,6 +44,7 @@ class PacketLog(models.Model):
     protocol = models.ForeignKey(Protocol, on_delete=models.SET_NULL, null=True, verbose_name='协议')
     payload = models.TextField(verbose_name='数据内容', blank=True)
     packet_size = models.IntegerField(verbose_name='数据包大小(字节)', default=0)
+    processing_time = models.FloatField(verbose_name='处理时间(毫秒)', default=0.0)
     direction = models.CharField(
         max_length=10,
         choices=DIRECTION_CHOICES,
@@ -97,6 +98,7 @@ class DeepInspectionResult(models.Model):
         verbose_name='风险等级'
     )
     is_malicious = models.BooleanField(verbose_name='是否恶意', default=False)
+    decoded_content = models.TextField(verbose_name='解码内容', blank=True, null=True)
     metadata = models.JSONField(verbose_name='元数据', default=dict, blank=True)
     
     def __str__(self):
