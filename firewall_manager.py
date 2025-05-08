@@ -19,6 +19,7 @@ from firewall_rules.models import Rule, RuleCategory, IPBlacklist, IPWhitelist
 from packet_analyzer.models import Protocol, PacketLog, DeepInspectionResult
 from packet_analyzer.scripts import PacketCaptureManager
 from packet_analyzer.dpi.firewall_engine import FirewallEngine
+from packet_analyzer.dpi.packet_analyzer import DPIPacketAnalyzer
 
 # 配置日志
 logging.basicConfig(
@@ -466,6 +467,55 @@ def clear_logs(log_type=None, days=None):
             print(f"已删除所有流量统计 ({count} 条)")
 
 
+def start_attack_detection_firewall():
+    """专门用于HTTP攻击测试的防火墙启动函数"""
+    print("\n启动专用HTTP攻击检测防火墙...")
+    
+    # 确保Web攻击规则已启用
+    web_attack_rules = Rule.objects.filter(name__in=[
+        'SQL注入攻击检测', 'XSS攻击检测', '命令注入攻击检测', '路径遍历攻击检测'
+    ])
+    for rule in web_attack_rules:
+        if not rule.is_enabled:
+            rule.is_enabled = True
+            rule.save()
+            print(f"已启用规则: {rule.name}")
+        else:
+            print(f"规则已启用: {rule.name}")
+    
+    # 启动防火墙引擎
+    engine = FirewallEngine()
+    if not engine.is_running():
+        success = engine.start()
+        if success:
+            print("防火墙引擎启动成功")
+            
+            # 更新系统状态
+            SystemStatus.objects.update_or_create(
+                defaults={
+                    'status': 'running',
+                    'firewall_running': True,
+                    'last_start_time': timezone.now()
+                }
+            )
+        else:
+            print("防火墙引擎启动失败")
+            return False
+    else:
+        print("防火墙引擎已经在运行")
+    
+    # 启动数据包分析器，监听localhost流量
+    try:
+        print("启动数据包分析器，准备捕获HTTP攻击流量...")
+        print("请在另一个终端窗口运行攻击测试脚本...")
+        analyzer = DPIPacketAnalyzer()
+        analyzer.start_packet_capture(timeout=120)  # 设置2分钟超时
+        return True
+    except Exception as e:
+        print(f"启动数据包分析器失败: {str(e)}")
+        return False
+
+
 def main():
     """主函数，处理命令行参数"""
     parser = argparse.ArgumentParser(description='DPI防火墙管理工具')
@@ -547,9 +597,16 @@ def main():
     clear_parser.add_argument('--type', choices=['packets', 'alerts', 'traffic'], help='日志类型 (不指定则清除所有)')
     clear_parser.add_argument('--days', type=int, help='清除多少天前的日志 (不指定则清除所有)')
     
+    # 攻击检测命令
+    parser.add_argument('--attack-detection', action='store_true', help='启动专用于HTTP攻击检测的防火墙')
+    
     # 解析参数
     args = parser.parse_args()
     
+    if args.attack_detection:
+        start_attack_detection_firewall()
+        return
+        
     # 处理命令
     if args.command == 'rule':
         if args.rule_action == 'list':

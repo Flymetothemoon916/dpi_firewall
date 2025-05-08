@@ -17,54 +17,28 @@ class Protocol(models.Model):
 
 
 class PacketLog(models.Model):
-    """数据包日志模型，记录网络数据包信息"""
-    INBOUND = 'inbound'
-    OUTBOUND = 'outbound'
-    
-    DIRECTION_CHOICES = [
-        (INBOUND, '入站'),
-        (OUTBOUND, '出站'),
-    ]
-    
-    ALLOWED = 'allowed'
-    BLOCKED = 'blocked'
-    SUSPICIOUS = 'suspicious'
-    
-    STATUS_CHOICES = [
-        (ALLOWED, '已允许'),
-        (BLOCKED, '已阻止'),
-        (SUSPICIOUS, '可疑'),
-    ]
-    
+    """网络数据包日志模型"""
     timestamp = models.DateTimeField(verbose_name='捕获时间', default=timezone.now, db_index=True)
     source_ip = models.GenericIPAddressField(verbose_name='源IP地址')
     source_port = models.IntegerField(verbose_name='源端口')
     destination_ip = models.GenericIPAddressField(verbose_name='目标IP地址')
     destination_port = models.IntegerField(verbose_name='目标端口')
-    protocol = models.ForeignKey(Protocol, on_delete=models.SET_NULL, null=True, verbose_name='协议')
-    payload = models.TextField(verbose_name='数据内容', blank=True)
-    packet_size = models.IntegerField(verbose_name='数据包大小(字节)', default=0)
+    protocol = models.ForeignKey(Protocol, on_delete=models.CASCADE, verbose_name='协议')
+    packet_size = models.IntegerField(verbose_name='包大小(字节)')
+    direction = models.CharField(verbose_name='方向', max_length=10, choices=[('inbound', '入站'), ('outbound', '出站')])
+    status = models.CharField(verbose_name='状态', max_length=15, 
+                             choices=[('allowed', '允许'), ('blocked', '阻止'), ('suspicious', '可疑'), ('error', '错误')])
+    matched_rule = models.ForeignKey('firewall_rules.Rule', on_delete=models.SET_NULL, 
+                                    null=True, blank=True, verbose_name='匹配规则')
+    is_important = models.BooleanField(verbose_name='是否重要', default=False)
+    is_read = models.BooleanField(verbose_name='是否已读', default=False)
+    notes = models.TextField(verbose_name='备注', blank=True)
+    payload = models.TextField(verbose_name='负载内容', blank=True)
+    raw_request = models.TextField(verbose_name='原始请求', blank=True, null=True)
+    attack_type = models.CharField(verbose_name='攻击类型', max_length=30, blank=True, null=True,
+                                  default='normal')
+    block_reason = models.TextField(verbose_name='拦截原因', blank=True, null=True)
     processing_time = models.FloatField(verbose_name='处理时间(毫秒)', default=0.0)
-    direction = models.CharField(
-        max_length=10,
-        choices=DIRECTION_CHOICES,
-        default=INBOUND,
-        verbose_name='方向'
-    )
-    status = models.CharField(
-        max_length=10,
-        choices=STATUS_CHOICES,
-        default=ALLOWED,
-        verbose_name='状态'
-    )
-    matched_rule = models.ForeignKey(
-        'firewall_rules.Rule',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        verbose_name='匹配规则',
-        related_name='matched_packets'
-    )
     
     def __str__(self):
         return f"{self.source_ip}:{self.source_port} → {self.destination_ip}:{self.destination_port} ({self.get_status_display()})"

@@ -13,6 +13,7 @@ from django.utils import timezone
 from packet_analyzer.models import Protocol, PacketLog, DeepInspectionResult
 from firewall_rules.models import Rule, IPBlacklist, IPWhitelist
 from dashboard.models import TrafficStatistics, AlertLog
+from packet_analyzer.dpi.protocol_rule_manager import protocol_rule_manager
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,9 @@ class FirewallModule:
             return True
         
         try:
+            # 初始化协议规则管理器
+            protocol_rule_manager.initialize()
+            
             # 从数据库加载规则
             self._load_rules()
             
@@ -81,22 +85,8 @@ class FirewallModule:
         for rule in active_rules:
             rule_patterns = list(rule.pattern.all())
             compiled_patterns = []
-        
-        # 补充SQL注入检测规则
-        sql_injection_patterns = [
-            r'(?i)\binformation_schema\b',
-            r'(?i)/\*.*?\*/',
-            r'(?i)--\s+',
-            r'(?i);\s*DROP\s+TABLE',
-            r'(?i)UNION\s+ALL\s+SELECT',
-            r'(?i)EXEC\s*\('
-        ]
-        
-        # 预编译新增的正则表达式
-        for p in sql_injection_patterns:
-            compiled_patterns.append(re.compile(p))
             
-        for pattern in rule_patterns:
+            for pattern in rule_patterns:
                 if pattern.is_regex:
                     try:
                         compiled_patterns.append(re.compile(pattern.pattern_string))
@@ -164,6 +154,9 @@ class FirewallModule:
     def reload_rules(self):
         """重新加载防火墙规则"""
         with self.lock:
+            # 重新加载协议规则管理器
+            protocol_rule_manager.reload_if_needed(force=True)
+            
             self._load_rules()
             self._load_ip_lists()
         
@@ -215,8 +208,15 @@ class FirewallModule:
         elif packet.haslayer(ICMP):
             protocol = "ICMP"
         
+        # 确定应用层协议
+        application_protocol = self._determine_application_protocol(packet, dst_port)
+        
+        # 根据应用层协议选择合适的规则集
+        applicable_rules = self._get_rules_for_application_protocol(application_protocol)
+        
         # 应用规则
-        for rule in self.rules:
+        block_rule_matched = False
+        for rule in applicable_rules:
             # 检查IP匹配
             if rule['source_ip'] and not self._ip_matches(src_ip, rule['source_ip']):
                 continue
@@ -235,8 +235,14 @@ class FirewallModule:
             if rule['protocol'] and protocol != rule['protocol']:
                 continue
             
-            # 检查DPI模式匹配
-            if rule['patterns'] and packet.haslayer(TCP) or packet.haslayer(UDP):
+            # 如果是HTTPS流量且规则需要内容检测，跳过内容检测
+            should_skip_content_inspection = (
+                application_protocol == 'HTTPS' and 
+                protocol_rule_manager.is_content_inspection_rule(rule['rule_obj'])
+            )
+            
+            # 检查DPI模式匹配，仅当不是HTTPS或不需要跳过内容检测时执行
+            if not should_skip_content_inspection and rule['patterns'] and (packet.haslayer(TCP) or packet.haslayer(UDP)):
                 raw_data = bytes(packet.payload)
                 match_found = False
                 
@@ -260,51 +266,105 @@ class FirewallModule:
             # 根据规则动作决定
             action = rule['action']
             if action == 'block':
+                block_rule_matched = True
                 self._update_stats("blocked", len(packet))
                 return "blocked", rule['rule_obj']
-            elif action == 'alert':
+            
+            if action == 'alert':
                 self._create_alert(rule['rule_obj'], src_ip, packet)
                 self._update_stats("allowed", len(packet))
                 return "allowed", rule['rule_obj']
-            elif action == 'log':
-                self._update_stats("allowed", len(packet))
-                return "allowed", rule['rule_obj']
+            
+            self._update_stats("allowed", len(packet))
+            return "allowed", rule['rule_obj']
         
-        # 如果没有匹配规则，默认允许
+        # 特殊处理：如果没有block规则匹配，则放行
+        if not block_rule_matched:
+            # 如果没有block规则被匹配，那么默认允许
+            self._update_stats("allowed", len(packet))
+            return "allowed", None
+        
+        # 没有匹配规则，默认允许
         self._update_stats("allowed", len(packet))
         return "allowed", None
     
+    def _determine_application_protocol(self, packet, dst_port):
+        """根据端口和包内容确定应用层协议"""
+        # 检查常见HTTP/HTTPS端口
+        if dst_port == 80:
+            return 'HTTP'
+        elif dst_port == 443:
+            return 'HTTPS'
+            
+        # 检查数据包中的SSL/TLS握手
+        if packet.haslayer(TCP) and len(packet) > 100:
+            try:
+                # 尝试检测SSL/TLS协议
+                data = bytes(packet.payload)
+                # TLS握手标记 (0x16)
+                if data and len(data) > 5 and data[0] == 0x16:
+                    return 'HTTPS'
+            except:
+                pass
+                
+        # 检查HTTP头
+        if packet.haslayer(TCP) and packet.haslayer(Raw):
+            try:
+                data = packet[Raw].load.decode('utf-8', errors='ignore')
+                if 'HTTP/' in data or 'GET ' in data or 'POST ' in data:
+                    return 'HTTP'
+            except:
+                pass
+        
+        # 默认按照其他协议处理，避免误拦截
+        return 'OTHER'
+    
+    def _get_rules_for_application_protocol(self, application_protocol):
+        """根据应用层协议获取适用的规则"""
+        if application_protocol == 'HTTPS':
+            # 对HTTPS流量，只应用不依赖内容检测的规则
+            return [rule for rule in self.rules if not protocol_rule_manager.is_content_inspection_rule(rule['rule_obj'])]
+        elif application_protocol == 'HTTP':
+            # 对HTTP流量，应用所有规则
+            return self.rules
+        else:
+            # 对未知协议，也只应用不依赖内容检测的规则，避免误拦截
+            return [rule for rule in self.rules if not protocol_rule_manager.is_content_inspection_rule(rule['rule_obj'])]
+    
     def _ip_matches(self, ip: str, rule_ip: str) -> bool:
-        """检查IP是否匹配规则
+        """
+        检查IP是否匹配规则中的IP表达式
         
         Args:
-            ip: 要检查的IP地址
+            ip: 要检查的IP
             rule_ip: 规则中的IP表达式（可能包含CIDR或逗号分隔列表）
             
         Returns:
             bool: 是否匹配
         """
         if not rule_ip:
-            return True
+            return True  # 空规则匹配所有IP
         
         # 处理逗号分隔的多个IP
         if ',' in rule_ip:
             ip_list = rule_ip.split(',')
             return any(self._ip_matches(ip, single_ip.strip()) for single_ip in ip_list)
         
-        # 处理CIDR表示法
+        # 处理CIDR格式
         if '/' in rule_ip:
             try:
                 network = ipaddress.ip_network(rule_ip, strict=False)
-                return ipaddress.ip_address(ip) in network
+                ip_obj = ipaddress.ip_address(ip)
+                return ip_obj in network
             except:
                 return False
         
-        # 完全匹配
+        # 精确匹配
         return ip == rule_ip
     
     def _port_matches(self, port: int, rule_port: str) -> bool:
-        """检查端口是否匹配规则
+        """
+        检查端口是否匹配规则中的端口表达式
         
         Args:
             port: 要检查的端口
@@ -314,9 +374,9 @@ class FirewallModule:
             bool: 是否匹配
         """
         if not rule_port:
-            return True
+            return True  # 空规则匹配所有端口
         
-        # 处理逗号分隔的多个端口
+        # 处理逗号分隔的多个端口或范围
         if ',' in rule_port:
             port_list = rule_port.split(',')
             return any(self._port_matches(port, single_port.strip()) for single_port in port_list)
@@ -329,25 +389,18 @@ class FirewallModule:
             except:
                 return False
         
-        # 单个端口匹配
+        # 精确匹配
         try:
             return port == int(rule_port)
         except:
             return False
     
     def _update_stats(self, action: str, packet_size: int):
-        """更新统计信息
-        
-        Args:
-            action: 数据包动作（allowed/blocked）
-            packet_size: 数据包大小
-        """
+        """更新流量统计"""
         with self.lock:
-            if action == "blocked":
-                self.stats['blocked_packets'] += 1
-            
-            # 确定方向并更新统计
-            direction = "inbound"  # 简化处理，实际应根据本机IP判断
+            # 更新统计数据
+            direction = "inbound" if packet_size > 0 else "outbound"
+            packet_size = abs(packet_size)
             
             if direction == "inbound":
                 self.stats['inbound_packets'] += 1
@@ -355,81 +408,79 @@ class FirewallModule:
             else:
                 self.stats['outbound_packets'] += 1
                 self.stats['outbound_bytes'] += packet_size
+                
+            if action == "blocked":
+                self.stats['blocked_packets'] += 1
             
-            # 每5分钟保存一次统计数据
-            now = timezone.now()
-            if (now - self.last_stats_update).total_seconds() > 300:
+            # 检查是否需要保存统计数据
+            current_time = timezone.now()
+            if (current_time - self.last_stats_update).total_seconds() >= 60:  # 每分钟保存一次
                 self._save_stats()
-                self.last_stats_update = now
-    
+                self.last_stats_update = current_time
+                
     def _save_stats(self):
         """保存流量统计到数据库"""
         try:
-            with self.lock:
-                # 计算每秒流量
-                current_time = timezone.now()
-                if hasattr(self, 'last_stats_time'):
-                    time_diff = (current_time - self.last_stats_time).total_seconds()
-                    if time_diff > 0:
-                        inbound_bytes_per_sec = self.stats['inbound_bytes'] / time_diff
-                        outbound_bytes_per_sec = self.stats['outbound_bytes'] / time_diff
-                    else:
-                        inbound_bytes_per_sec = self.stats['inbound_bytes']
-                        outbound_bytes_per_sec = self.stats['outbound_bytes']
-                else:
-                    inbound_bytes_per_sec = self.stats['inbound_bytes']
-                    outbound_bytes_per_sec = self.stats['outbound_bytes']
+            current_time = timezone.now()
+            time_diff = (current_time - self.last_stats_time).total_seconds()
+            
+            if time_diff <= 0:
+                return
                 
-                TrafficStatistics.objects.create(
-                    timestamp=current_time,
-                    inbound_packets=self.stats['inbound_packets'],
-                    outbound_packets=self.stats['outbound_packets'],
-                    inbound_bytes=self.stats['inbound_bytes'],
-                    outbound_bytes=self.stats['outbound_bytes'],
-                    blocked_packets=self.stats['blocked_packets'],
-                    inbound_bytes_per_sec=inbound_bytes_per_sec,
-                    outbound_bytes_per_sec=outbound_bytes_per_sec
-                )
-                
-                # 更新最后统计时间
-                self.last_stats_time = current_time
-                
-                # 重置计数器
-                self.stats['inbound_packets'] = 0
-                self.stats['outbound_packets'] = 0
-                self.stats['inbound_bytes'] = 0
-                self.stats['outbound_bytes'] = 0
-                self.stats['blocked_packets'] = 0
-                
-                logger.info("流量统计已保存到数据库")
+            # 计算速率 (字节/秒)
+            inbound_rate = self.stats['inbound_bytes'] / time_diff if time_diff > 0 else 0
+            outbound_rate = self.stats['outbound_bytes'] / time_diff if time_diff > 0 else 0
+            
+            # 创建统计记录
+            TrafficStatistics.objects.create(
+                timestamp=current_time,
+                inbound_packets=self.stats['inbound_packets'],
+                outbound_packets=self.stats['outbound_packets'],
+                inbound_bytes=self.stats['inbound_bytes'],
+                outbound_bytes=self.stats['outbound_bytes'],
+                blocked_packets=self.stats['blocked_packets'],
+                inbound_rate=inbound_rate,
+                outbound_rate=outbound_rate
+            )
+            
+            # 重置统计
+            self.stats = {
+                'inbound_packets': 0,
+                'outbound_packets': 0,
+                'inbound_bytes': 0,
+                'outbound_bytes': 0, 
+                'blocked_packets': 0,
+            }
+            self.last_stats_time = current_time
+            
         except Exception as e:
             logger.error(f"保存流量统计失败: {str(e)}")
     
     def _create_alert(self, rule: Rule, src_ip: str, packet):
-        """创建告警记录
+        """
+        创建规则触发告警
         
         Args:
             rule: 匹配的规则
             src_ip: 源IP地址
-            packet: 数据包
+            packet: 原始数据包
         """
         try:
-            # 决定告警级别
-            level = 'info'
+            # 根据规则优先级设置告警级别
+            alert_level = 'info'
             if rule.priority == 'critical':
-                level = 'critical'
+                alert_level = 'critical'
             elif rule.priority == 'high':
-                level = 'warning'
+                alert_level = 'warning'
             
+            # 创建告警
             AlertLog.objects.create(
-                timestamp=timezone.now(),
-                level=level,
                 title=f"防火墙规则触发: {rule.name}",
                 description=f"从 {src_ip} 的流量触发了规则 '{rule.name}'。{rule.description}",
-                source_ip=src_ip,
-                is_read=False
+                level=alert_level,
+                source_ip=src_ip
             )
             
             logger.info(f"已创建告警 - 规则: {rule.name}, IP: {src_ip}")
         except Exception as e:
-            logger.error(f"创建告警失败: {str(e)}")
+            logger.error(f"创建告警失败: {str(e)}") 

@@ -1,0 +1,12 @@
+README.md
+setup.cfg
+setup.py
+manuf/__init__.py
+manuf/__main__.py
+manuf/manuf
+manuf/manuf.py
+manuf.egg-info/PKG-INFO
+manuf.egg-info/SOURCES.txt
+manuf.egg-info/dependency_links.txt
+manuf.egg-info/entry_points.txt
+manuf.egg-info/top_level.txt

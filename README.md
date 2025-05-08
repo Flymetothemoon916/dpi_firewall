@@ -72,3 +72,57 @@ DPI-Firewall/
 - 异常行为检测
 - 告警通知
 
+## HTTP攻击测试
+
+项目包含HTTP攻击测试功能，用于验证防火墙的安全防护能力。
+
+### 配置与运行测试
+
+1. 首先，确保已创建Web攻击检测规则：
+
+```bash
+python test_firewall_rules.py --setup
+```
+
+2. 启动Django开发服务器：
+
+```bash
+python manage.py runserver
+```
+
+3. 在另一个终端窗口运行HTTP攻击测试套件：
+
+```bash
+python http_attack_suite.py http://localhost:8000 -v
+```
+
+4. 检查防火墙日志记录：
+
+```bash
+python test_firewall_rules.py --check-logs
+```
+
+### 攻击类型
+
+测试套件支持以下攻击类型：
+
+- **SQL注入**：测试常见的SQL注入攻击模式
+- **XSS攻击**：测试跨站脚本攻击
+- **命令注入**：测试操作系统命令注入
+- **路径遍历**：测试目录遍历攻击
+
+### 自定义测试
+
+可以通过以下参数自定义测试：
+
+```bash
+python http_attack_suite.py [目标URL] [选项]
+
+选项:
+  -v, --verbose      详细输出模式
+  --skip-sql         跳过SQL注入测试
+  --skip-xss         跳过XSS测试
+  --skip-cmd         跳过命令注入测试
+  --skip-path        跳过路径遍历测试
+```
+

@@ -107,23 +107,64 @@ class Command(BaseCommand):
             # 初始化变量
             action = "allowed"
             matched_rule = None
+            block_reason = ""
             
             try:
                 # 先使用防火墙引擎处理数据包
                 result = firewall.process_packet(packet)
                 if isinstance(result, tuple) and len(result) == 2:
                     action, matched_rule = result
+                    
+                    # 记录拦截原因
+                    if action == "blocked" and matched_rule:
+                        # 检查是否为HTTPS加密流量
+                        is_https = False
+                        if hasattr(packet, "dport") and packet.dport == 443:
+                            is_https = True
+                        elif hasattr(packet, "sport") and packet.sport == 443:
+                            is_https = True
+                        
+                        if is_https:
+                            # 为加密流量提供更明确的原因
+                            if matched_rule and ("sql" in matched_rule.name.lower() or "注入" in matched_rule.name):
+                                block_reason = f"被规则'{matched_rule.name}'拦截的HTTPS加密流量 (注：无法检查加密内容)"
+                                logger.warning(f"警告: HTTPS加密流量被SQL注入规则'{matched_rule.name}'拦截，可能是误判")
+                            else:
+                                block_reason = f"被规则'{matched_rule.name}'拦截的HTTPS加密流量 (注：无法检查加密内容)"
+                        else:
+                            block_reason = f"触发规则: {matched_rule.name}"
+                            if matched_rule.description:
+                                block_reason += f" - {matched_rule.description}"
+                    elif action == "blocked":
+                        block_reason = "防火墙策略拦截"
+                        
+                    if action == "blocked":
+                        logger.info(f"拦截数据包: {block_reason}")
                 else:
+                    # 处理非预期的返回值格式
                     logger.error(f"防火墙处理结果格式错误: {result}")
-                    action = "blocked"
+                    logger.info("使用默认处理方式: 允许并记录")
+                    # 如果是布尔值，用于兼容旧版本逻辑
+                    if isinstance(result, bool):
+                        action = "allowed" if result else "blocked"
+                        if not result:
+                            block_reason = "通用拦截策略"
+                    else:
+                        action = "allowed"  # 默认允许
                 
-                # 如果允许通过，进一步分析
-                if action == "allowed":
-                    analyzer.process_packet(packet)
+                # 无论允许还是拦截，都分析和记录数据包
+                # 将防火墙处理结果作为状态传递给分析器
+                analyzer.process_packet(packet, status=action, rule=matched_rule, block_reason=block_reason)
                     
             except Exception as e:
                 logger.error(f"处理数据包时出错: {str(e)}")
                 action = "blocked"  # 出错时默认阻止
+                block_reason = f"处理错误: {str(e)}"
+                # 即使出错也尝试记录数据包
+                try:
+                    analyzer.process_packet(packet, status="error", block_reason=block_reason)
+                except:
+                    pass
                 
             return action
 

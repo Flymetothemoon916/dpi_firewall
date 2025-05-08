@@ -70,47 +70,56 @@ def packet_detail(request, packet_id):
         'info': '',
         'raw': '',
         'hex': '',
-        'structure': ''
+        'structure': '',
+        'http_request': ''  # HTTP请求内容
     }
+    
+    # 如果有原始HTTP请求，优先展示
+    if packet.raw_request:
+        packet_payload['http_request'] = packet.raw_request
+        
+        # 格式化HTTP请求用于高亮显示
+        if packet.attack_type != 'normal':
+            packet_payload['http_request'] += f"\n\n# 检测到的攻击类型: {packet.attack_type}"
     
     if packet.payload:
         payload = packet.payload
         
         # 提取基本信息部分
         if "=== PACKET INFO ===" in payload:
+            info_index = payload.find("=== PACKET INFO ===")
             raw_index = payload.find("=== RAW PAYLOAD ===")
-            if raw_index > 0:
-                packet_payload['info'] = payload[:raw_index]
-            else:
-                packet_payload['info'] = payload
-        
-        # 提取原始载荷部分
-        if "=== RAW PAYLOAD ===" in payload:
-            raw_start = payload.find("=== RAW PAYLOAD ===")
-            hex_start = payload.find("=== HEXDUMP ===")
-            if hex_start > raw_start:
-                packet_payload['raw'] = payload[raw_start:hex_start]
-            else:
-                packet_payload['raw'] = payload[raw_start:]
-        
-        # 提取十六进制部分
-        if "=== HEXDUMP ===" in payload:
-            hex_start = payload.find("=== HEXDUMP ===")
-            structure_start = payload.find("=== PACKET STRUCTURE ===")
-            if structure_start > hex_start:
-                packet_payload['hex'] = payload[hex_start:structure_start]
-            else:
-                packet_payload['hex'] = payload[hex_start:]
-        
-        # 提取数据包结构部分
-        if "=== PACKET STRUCTURE ===" in payload:
-            structure_start = payload.find("=== PACKET STRUCTURE ===")
-            packet_payload['structure'] = payload[structure_start:]
+            if raw_index > info_index:
+                packet_payload['info'] = payload[info_index:raw_index].strip()
+                
+                # 提取原始载荷部分
+                hex_index = payload.find("=== HEXDUMP ===")
+                if hex_index > raw_index:
+                    packet_payload['raw'] = payload[raw_index:hex_index].strip()
+                    
+                    # 提取十六进制部分
+                    structure_index = payload.find("=== PACKET STRUCTURE ===")
+                    if structure_index > hex_index:
+                        packet_payload['hex'] = payload[hex_index:structure_index].strip()
+                        
+                        # 提取数据包结构部分
+                        if structure_index > 0:
+                            packet_payload['structure'] = payload[structure_index:].strip()
+        else:
+            # 如果没有格式化的部分，将整个载荷作为结构信息
+            packet_payload['structure'] = payload
     
+    # 强调HTTP请求内容
+    if packet.raw_request and not packet_payload['http_request']:
+        packet_payload['http_request'] = packet.raw_request
+    
+    # 添加攻击类型分析
     context = {
         'packet': packet,
         'dpi_result': dpi_result,
-        'packet_payload': packet_payload
+        'packet_payload': packet_payload,
+        'attack_detected': packet.attack_type != 'normal',
+        'attack_type': packet.attack_type,
     }
     
     return render(request, 'packet_analyzer/packet_detail.html', context)
